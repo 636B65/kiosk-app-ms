@@ -1,4 +1,10 @@
-You are porting a new kiosk-app release into kiosk-app-ms (this repository).
+# Porting a kiosk-app release
+
+The *Track kiosk-app* workflow opens a PR for every new kiosk-app release with
+the frontend already synced. This is the checklist for porting the backend
+part (by hand, or by handing this file to an AI assistant). Below, `{{TAG}}` is
+the new release and `{{FROM}}` the previously ported one; check kiosk-app out
+at `{{TAG}}` into `upstream-src/` (git-ignored) to read its code.
 
 kiosk-app (checked out in `upstream-src/`) is the original monolith: FastAPI in
 `upstream-src/backend/`, the same vanilla-JS frontend, Playwright e2e tests.
@@ -40,9 +46,6 @@ Your job: make every feature, bug fix and security fix of that diff work here.
      ruff check .
      pytest -q
      node --check frontend/js/*.js
-8. Do not commit or push; the workflow does that. Do not touch
-   `upstream-src/`, `upstream/kiosk-app.version` or `.github/workflows/`.
 
 If something cannot be ported sensibly, leave a clear note in
-`upstream/changes/{{TAG}}-notes.md` explaining what and why. Write that file in
-any case with a short summary of what you ported where.
+`upstream/changes/{{TAG}}-notes.md` explaining what and why. 

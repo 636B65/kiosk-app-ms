@@ -73,4 +73,4 @@ Run all four checks before finishing a change.
 `upstream/kiosk-app.version` is the ported kiosk-app release. `frontend/index.html`,
 `css/` and `js/` are copies made by `scripts/sync-frontend.sh`; put local UI
 differences in that script, never only in the copied files. Sync PRs come from
-`.github/workflows/upstream-sync.yml` using `.github/upstream-port-prompt.md`.
+`.github/workflows/track-kiosk-app.yml`; port backend changes with `upstream/PORTING.md`.

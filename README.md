@@ -1,5 +1,8 @@
 # kiosk-app-ms
 
+[![CI](https://github.com/636B65/kiosk-app-ms/actions/workflows/ci.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/ci.yml)
+[![Track kiosk-app](https://github.com/636B65/kiosk-app-ms/actions/workflows/track-kiosk-app.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/track-kiosk-app.yml)
+
 The self-service store kiosk from [kiosk-app](https://github.com/636B65/kiosk-app),
 rebuilt as microservices for Kubernetes. Customers pick products on a touchscreen,
 check out on a tab under their username (optionally protected by a PIN), and the
@@ -150,20 +153,13 @@ tests/integration/       cross-service tests through an in-process gateway
 
 ## Following kiosk-app
 
-New kiosk-app releases are brought here automatically. `upstream-sync.yml` checks
-daily for a release newer than `upstream/kiosk-app.version` (now v1.5.0), copies
-the frontend, lets Claude port the backend changes into the services when the
-`ANTHROPIC_API_KEY` secret is set, runs the checks and opens a PR
-`Sync with kiosk-app vX.Y.Z`. See [upstream/README.md](upstream/README.md).
-
-One-time setup:
-
-- Add the repository secret `ANTHROPIC_API_KEY` (without it the PR contains the
-  frontend and the backend diff to port by hand).
-- Settings > Actions > General: enable "Allow GitHub Actions to create and
-  approve pull requests" (otherwise the workflow opens an issue instead).
-
-Run it by hand with Actions > Upstream sync > Run workflow (optionally a tag).
+The [Track kiosk-app](.github/workflows/track-kiosk-app.yml) workflow checks
+daily for a kiosk-app release newer than `upstream/kiosk-app.version` (now
+v1.5.0), the same way terraform-kubernetes tracks ansible-role-kubernetes: no
+secrets needed. It opens a PR `Track kiosk-app vX.Y.Z` with the frontend synced
+and the backend diff to port; see [upstream/README.md](upstream/README.md).
+Enable Settings > Actions > General > "Allow GitHub Actions to create and
+approve pull requests" (otherwise it opens an issue instead).
 
 ## Releasing
 

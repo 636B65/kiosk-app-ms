@@ -43,5 +43,5 @@ First release of the kiosk as microservices (a rewrite of
 - docker compose stack for local development; GitHub Actions CI (lint, 40
   in-process integration tests across all services, manifest validation,
   image builds, compose smoke) and image publishing to GHCR. 53 tests in all.
-- Upstream sync: a daily workflow follows kiosk-app releases (ported: v1.5.0)
-  and opens a PR with the synced frontend and the backend changes ported.
+- Track kiosk-app: a daily workflow follows kiosk-app releases (ported: v1.5.0)
+  and opens a PR with the synced frontend and the backend diff to port.
