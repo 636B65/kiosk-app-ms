@@ -1,0 +1,50 @@
+# Production: pinned image tags, two replicas of every stateless service, TLS
+# on the Ingress. The kiosk-secrets Secret is NOT generated here - create it
+# out of band (kubectl, Sealed Secrets, External Secrets; see secrets.example.yaml).
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: kiosk
+
+resources:
+  - ../../base
+
+images:
+  - name: ghcr.io/636b65/kiosk-app-ms/auth-service
+    newTag: 1.0.0
+  - name: ghcr.io/636b65/kiosk-app-ms/catalog-service
+    newTag: 1.0.0
+  - name: ghcr.io/636b65/kiosk-app-ms/customer-service
+    newTag: 1.0.0
+  - name: ghcr.io/636b65/kiosk-app-ms/order-service
+    newTag: 1.0.0
+  - name: ghcr.io/636b65/kiosk-app-ms/settings-service
+    newTag: 1.0.0
+  - name: ghcr.io/636b65/kiosk-app-ms/audit-service
+    newTag: 1.0.0
+  - name: ghcr.io/636b65/kiosk-app-ms/report-service
+    newTag: 1.0.0
+  - name: ghcr.io/636b65/kiosk-app-ms/system-service
+    newTag: 1.0.0
+  - name: ghcr.io/636b65/kiosk-app-ms/frontend
+    newTag: 1.0.0
+
+replicas:
+  - name: auth-service
+    count: 2
+  - name: customer-service
+    count: 2
+  - name: order-service
+    count: 2
+  - name: settings-service
+    count: 2
+  - name: audit-service
+    count: 2
+  - name: report-service
+    count: 2
+  - name: frontend
+    count: 2
+
+patches:
+  - path: ingress-patch.yaml
+  - path: postgres-storage-patch.yaml
