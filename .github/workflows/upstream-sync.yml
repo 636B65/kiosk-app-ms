@@ -1,0 +1,213 @@
+name: Upstream sync (kiosk-app)
+
+# Follows the original monolith, 636B65/kiosk-app. When it publishes a release
+# newer than upstream/kiosk-app.version, this opens a PR that brings the
+# release's features and fixes here (see upstream/README.md).
+on:
+  schedule:
+    - cron: '17 5 * * *'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: kiosk-app tag to sync (default = its latest release)
+        required: false
+        type: string
+  # kiosk-app can trigger this right after a release:
+  #   gh api repos/636B65/kiosk-app-ms/dispatches -f event_type=kiosk-app-release -F 'client_payload[tag]=v1.6.0'
+  repository_dispatch:
+    types: [kiosk-app-release]
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  UPSTREAM_REPO: 636B65/kiosk-app
+
+jobs:
+  check:
+    name: Look for a new kiosk-app release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      current: ${{ steps.check.outputs.current }}
+      target: ${{ steps.check.outputs.target }}
+      needed: ${{ steps.check.outputs.needed }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Compare versions
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.tag || github.event.client_payload.tag || '' }}
+        run: |
+          current="$(tr -d '[:space:]' < upstream/kiosk-app.version)"
+          target="$(printf %s "$REQUESTED" | tr -cd 'A-Za-z0-9._-')"
+          if [ -z "$target" ]; then
+            target="$(gh api "repos/$UPSTREAM_REPO/releases/latest" --jq .tag_name)"
+          fi
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "kiosk-app: ported $current, latest $target"
+          newest="$(printf '%s\n%s\n' "${current#v}" "${target#v}" | sort -V | tail -n1)"
+          if [ "$target" = "$current" ] || [ "$newest" = "${current#v}" ]; then
+            echo "Up to date."; echo "needed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          branch="upstream/kiosk-app-$target"
+          if [ "$(gh pr list --head "$branch" --state all --json number --jq length)" != "0" ]; then
+            echo "A PR for $branch already exists."; echo "needed=false" >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          echo "needed=true" >> "$GITHUB_OUTPUT"
+
+  sync:
+    name: Port kiosk-app ${{ needs.check.outputs.target }}
+    needs: check
+    if: needs.check.outputs.needed == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+      id-token: write
+    env:
+      FROM: ${{ needs.check.outputs.current }}
+      TAG: ${{ needs.check.outputs.target }}
+      BRANCH: upstream/kiosk-app-${{ needs.check.outputs.target }}
+      HAS_CLAUDE: ${{ secrets.ANTHROPIC_API_KEY != '' }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check out kiosk-app
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM_REPO }}
+          path: upstream-src
+          fetch-depth: 0
+
+      - name: Collect the upstream changes
+        run: |
+          mkdir -p upstream/changes
+          notes="upstream/changes/$TAG.md"
+          # Every CHANGELOG section newer than the ported version, up to TAG.
+          awk -v to="## [${TAG#v}]" -v from="## [${FROM#v}]" '
+            /^## \[/ { if (index($0, from) == 1) exit; if (index($0, to) == 1) on = 1 }
+            on { print }
+          ' upstream-src/CHANGELOG.md > "$notes.body"
+          {
+            echo "# kiosk-app $FROM -> $TAG"
+            echo
+            echo "Compare: https://github.com/$UPSTREAM_REPO/compare/$FROM...$TAG"
+            echo
+            echo '```'
+            git -C upstream-src diff --stat "$FROM" "$TAG"
+            echo '```'
+            echo
+            cat "$notes.body"
+          } > "$notes"
+          rm "$notes.body"
+          git -C upstream-src diff "$FROM" "$TAG" -- backend tests docker-compose.yml frontend/nginx.conf frontend/Dockerfile \
+            > "upstream/changes/$TAG-backend.diff"
+          wc -l "upstream/changes/$TAG-backend.diff"
+          git -C upstream-src checkout -q "$TAG"
+
+      - name: Sync the frontend
+        run: sh scripts/sync-frontend.sh upstream-src
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: |
+          pip install -U pip
+          pip install -r requirements-dev.txt -e libs/kiosk_common
+
+      - name: Prepare the porting prompt
+        if: env.HAS_CLAUDE == 'true'
+        id: prompt
+        run: |
+          sed -e "s/{{TAG}}/$TAG/g" -e "s/{{FROM}}/$FROM/g" .github/upstream-port-prompt.md > "$RUNNER_TEMP/prompt.md"
+          {
+            echo "text<<PROMPT_EOF"
+            cat "$RUNNER_TEMP/prompt.md"
+            echo "PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Port the backend changes with Claude
+        if: env.HAS_CLAUDE == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: ${{ steps.prompt.outputs.text }}
+          claude_args: >-
+            --max-turns 250
+            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(pip:*),Bash(pytest:*),Bash(ruff:*),Bash(node --check:*),Bash(python:*),Bash(sh scripts/sync-frontend.sh:*),Bash(git diff:*),Bash(git status:*),Bash(ls:*),Bash(cat:*),Bash(grep:*),Bash(sed:*)"
+
+      - name: Run the checks
+        id: checks
+        continue-on-error: true
+        run: |
+          ruff check .
+          pytest -q
+          node --check frontend/js/*.js
+
+      - name: Commit and push the branch
+        run: |
+          rm -rf upstream-src
+          find . -name __pycache__ -prune -exec rm -rf {} +
+          echo "$TAG" > upstream/kiosk-app.version
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "Sync with kiosk-app $TAG" -m "Upstream changes $FROM..$TAG: https://github.com/$UPSTREAM_REPO/compare/$FROM...$TAG"
+          git push -u origin "$BRANCH"
+
+      - name: Run CI on the branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Pushes made with GITHUB_TOKEN do not start other workflows; a dispatch does.
+        run: gh workflow run ci.yml --ref "$BRANCH"
+
+      - name: Open the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CHECKS: ${{ steps.checks.outcome }}
+        run: |
+          body="$RUNNER_TEMP/body.md"
+          {
+            echo "Brings kiosk-app **$TAG** (from $FROM) into the microservices."
+            echo
+            if [ "$HAS_CLAUDE" = "true" ]; then
+              echo "- Frontend copied from kiosk-app; backend changes ported by Claude (see \`upstream/changes/$TAG-notes.md\`)."
+            else
+              echo "- Frontend copied from kiosk-app. **Backend changes are NOT ported yet** (no \`ANTHROPIC_API_KEY\` secret): port \`upstream/changes/$TAG-backend.diff\` into the services before merging."
+            fi
+            if [ "$CHECKS" = "success" ]; then
+              echo "- ruff, pytest and node --check passed in the sync run."
+            else
+              echo "- :warning: ruff/pytest/node --check FAILED in the sync run; see the workflow log."
+            fi
+            echo
+            echo "Review the changes, check CI, and add a CHANGELOG version if the port did not."
+            echo
+            cat "upstream/changes/$TAG.md"
+          } > "$body"
+          if ! gh pr create --base main --head "$BRANCH" --title "Sync with kiosk-app $TAG" --body-file "$body"; then
+            echo "::warning::Could not open a PR (enable Settings > Actions > General > 'Allow GitHub Actions to create and approve pull requests'). Opening an issue instead."
+            gh issue create --title "Sync with kiosk-app $TAG" \
+              --body "Branch \`$BRANCH\` is ready: https://github.com/$GITHUB_REPOSITORY/compare/main...$BRANCH
+
+          $(cat "$body")"
+          fi

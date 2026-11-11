@@ -12,3 +12,4 @@ data/
 *.db-shm
 pin_pepper.key
 node_modules/
+upstream-src/

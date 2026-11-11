@@ -15,9 +15,13 @@ COPY --chown=nginx:nginx js/ /usr/share/nginx/html/js/
 # the named build context "repo": compose additional_contexts / buildx --build-context repo=.).
 ARG APP_VERSION=
 ARG GIT_COMMIT=
+# The unprivileged base image runs as nginx (101); the html dir is root-owned.
+USER root
 RUN --mount=type=bind,from=repo,target=/tmp/repo \
     cp /tmp/repo/CHANGELOG.md /usr/share/nginx/html/CHANGELOG.md \
     && sh /tmp/repo/scripts/release-info.sh /tmp/repo "$APP_VERSION" "$GIT_COMMIT" \
-       > /usr/share/nginx/html/version.json
+       > /usr/share/nginx/html/version.json \
+    && chown nginx:nginx /usr/share/nginx/html/CHANGELOG.md /usr/share/nginx/html/version.json
+USER 101
 
 EXPOSE 8080

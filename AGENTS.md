@@ -67,3 +67,10 @@ Run all four checks before finishing a change.
 - Outbox delivery is explicit in tests: `stack.flush_outboxes()` before reading
   the audit log.
 - Docker compose smoke runs in CI only (needs a Docker daemon).
+
+## Upstream (kiosk-app)
+
+`upstream/kiosk-app.version` is the ported kiosk-app release. `frontend/index.html`,
+`css/` and `js/` are copies made by `scripts/sync-frontend.sh`; put local UI
+differences in that script, never only in the copied files. Sync PRs come from
+`.github/workflows/upstream-sync.yml` using `.github/upstream-port-prompt.md`.
