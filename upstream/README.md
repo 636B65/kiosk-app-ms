@@ -11,7 +11,9 @@ needed. For a new release it pushes branch `track/kiosk-app-<tag>` with:
 - the frontend copied from that release (`scripts/sync-frontend.sh`),
 - `changes/<tag>.md` (release notes) and `changes/<tag>-backend.diff`,
 - `kiosk-app.version` bumped,
+- this repo's version bumped at the same semver level as kiosk-app's release
+  (new `CHANGELOG.md` section + prod overlay image tags),
 
 starts CI on it and opens a pull request (or an issue if Actions may not open
-PRs). Port the backend diff into the services with `PORTING.md`, add a
-CHANGELOG version, merge - the release workflow then publishes new images.
+PRs). Port the backend diff into the services with `PORTING.md` and merge -
+the release workflow then tags and publishes that version.

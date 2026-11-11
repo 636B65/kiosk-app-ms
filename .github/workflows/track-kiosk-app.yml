@@ -2,9 +2,11 @@ name: Track kiosk-app
 
 # Checks daily for a new release of kiosk-app (the monolith this repository
 # was split from). When one exists, it syncs the frontend, records the
-# backend changes to port, bumps upstream/kiosk-app.version on a branch and
-# opens a pull request (or an issue, if the repository does not allow GitHub
-# Actions to create pull requests). No secrets needed.
+# backend changes to port, bumps upstream/kiosk-app.version and this repo's
+# own version (Semantic Versioning: the same level as kiosk-app's release -
+# major, minor or patch) on a branch and opens a pull request (or an issue,
+# if the repository does not allow GitHub Actions to create pull requests).
+# No secrets needed.
 
 on:
   schedule:
@@ -40,6 +42,13 @@ jobs:
           newest="$(printf '%s\n%s\n' "$current" "$latest" | sort -V | tail -n1)"
           if [[ -n "$latest" && "$latest" != "$current" && "$newest" == "$latest" ]]; then
             echo "update=true" >> "$GITHUB_OUTPUT"
+            level="$(sh scripts/semver.sh level "$current" "$latest")"
+            ours="$(sh scripts/semver.sh current)"
+            next="$(sh scripts/semver.sh bump "$ours" "$level")"
+            echo "kiosk-app $level release: kiosk-app-ms $ours -> $next"
+            echo "level=$level" >> "$GITHUB_OUTPUT"
+            echo "ours=$ours" >> "$GITHUB_OUTPUT"
+            echo "next=$next" >> "$GITHUB_OUTPUT"
           else
             echo "update=false" >> "$GITHUB_OUTPUT"
           fi
@@ -54,6 +63,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           CURRENT: ${{ steps.check.outputs.current }}
           LATEST: ${{ steps.check.outputs.latest }}
+          LEVEL: ${{ steps.check.outputs.level }}
+          OURS: ${{ steps.check.outputs.ours }}
+          NEXT: ${{ steps.check.outputs.next }}
         run: |
           branch="track/kiosk-app-$LATEST"
           if git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
@@ -78,6 +90,16 @@ jobs:
 
           echo "$LATEST" > upstream/kiosk-app.version
 
+          # Our own release, at the same semver level as kiosk-app's: a new
+          # CHANGELOG section (what release.yml tags and publishes on merge)
+          # and the prod overlay pinned to the images that release builds.
+          notes_url="https://github.com/$UPSTREAM_REPO/releases/tag/$LATEST"
+          awk -v head="## [$NEXT] - $(date -u +%Y-%m-%d)" -v line="- Ported from kiosk-app $LATEST ([release notes]($notes_url)), a $LEVEL release: frontend synced; backend: see upstream/changes/$LATEST.md." '
+            /^## \[/ && !done { print head; print ""; print "### Changed"; print line; print ""; done = 1 }
+            { print }
+          ' CHANGELOG.md > CHANGELOG.tmp && mv CHANGELOG.tmp CHANGELOG.md
+          sed -i "s/^\(    newTag: \)$OURS\$/\1$NEXT/" deploy/overlays/prod/kustomization.yaml
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
@@ -87,20 +109,26 @@ jobs:
           # Pushes made with GITHUB_TOKEN do not start CI; a dispatch does.
           gh workflow run ci.yml --ref "$branch" || true
 
-          title="Track kiosk-app $LATEST"
+          title="Track kiosk-app $LATEST (kiosk-app-ms $NEXT, $LEVEL)"
           cat > body.md <<BODY
           kiosk-app has a new release: **$CURRENT -> $LATEST**.
 
           - Release notes: https://github.com/$UPSTREAM_REPO/releases/tag/$LATEST
           - Changes: https://github.com/$UPSTREAM_REPO/compare/$CURRENT...$LATEST
 
+          This is a **$LEVEL** release upstream, so kiosk-app-ms follows with a $LEVEL release too (Semantic Versioning): **$OURS -> $NEXT**.
+
+          $( [[ "$LEVEL" == "major" ]] && echo "> **Major version.** kiosk-app changed something incompatibly; read its upgrade notes and check API clients, data and deployments before merging." )
+
           Done on this branch:
           - Frontend (\`index.html\`, \`css/\`, \`js/\`) copied from kiosk-app $LATEST.
           - \`upstream/kiosk-app.version\` set to $LATEST.
+          - CHANGELOG.md: new section \`[$NEXT]\`; merging this PR releases v$NEXT (images \`$NEXT\` + \`latest\`).
+          - \`deploy/overlays/prod\` image tags set to \`$NEXT\` (sync Argo CD once the release has published them).
 
           To do before merging (backend: ${stat:-no changes}):
-          - Port \`upstream/changes/$LATEST-backend.diff\` into the services, following \`upstream/PORTING.md\`.
-          - Add a version section to CHANGELOG.md so the release workflow publishes new images.
+          - Port \`upstream/changes/$LATEST-backend.diff\` into the services, following \`upstream/PORTING.md\`, and list what changed under \`[$NEXT]\` in CHANGELOG.md.
+          - If the port itself breaks clients beyond what kiosk-app did, raise the bump (e.g. minor -> major) in CHANGELOG.md and the prod overlay.
 
           $(cat "upstream/changes/$LATEST.md")
           BODY

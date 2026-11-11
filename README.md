@@ -163,7 +163,10 @@ approve pull requests" (otherwise it opens an issue instead).
 
 ## Releasing
 
-Add a `## [x.y.z] - date` section to `CHANGELOG.md` and merge to main. When CI
+Versions follow [Semantic Versioning](https://semver.org/): PATCH for fixes,
+MINOR for backwards-compatible features, MAJOR for breaking API, data or
+deployment changes. Releases that follow kiosk-app use the same level as the
+kiosk-app release (the tracking PR sets it). Add a `## [x.y.z] - date` section to `CHANGELOG.md` and merge to main. When CI
 is green, `release.yml` tags the commit and `publish-images.yml` pushes the nine
 images as `x.y.z` and `latest` and creates the GitHub Release. Then bump the
 tags in `deploy/overlays/prod/kustomization.yaml` and let Argo CD sync.

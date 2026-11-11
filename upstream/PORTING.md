@@ -37,10 +37,12 @@ Your job: make every feature, bug fix and security fix of that diff work here.
    (or a service's own `tests/`). A bug fix needs a test that fails without it.
 5. Changes to deployment (Dockerfile, nginx.conf, env vars): mirror them in
    `docker/`, `frontend/`, `docker-compose.yml` and `deploy/` where relevant.
-6. Add a `## [x.y.z] - <today>` section to CHANGELOG.md at the top. Bump this
-   repo's version the same way upstream bumped (patch -> patch, minor -> minor,
-   major -> major) and say "Ported from kiosk-app {{TAG}}" plus a short list.
-   Update the test count in README.md if it changed.
+6. Versioning follows Semantic Versioning at the same level as kiosk-app
+   (patch -> patch, minor -> minor, major -> major). The tracking PR already
+   added the `## [x.y.z]` CHANGELOG section and set the prod image tags; list
+   what you ported under it. Raise the level only if the port breaks clients
+   on its own (`scripts/semver.sh` computes levels and bumps). Update the test
+   count in README.md if it changed.
 7. Run and make pass, fixing your code (never weakening or skipping tests):
      pip install -r requirements-dev.txt -e libs/kiosk_common
      ruff check .

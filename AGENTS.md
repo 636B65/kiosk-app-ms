@@ -56,7 +56,11 @@ Run all four checks before finishing a change.
   unreachable/5xx become 502.
 - `timeutil.utcnow()` only; naive UTC timestamps; `money()` for amounts.
 - No build step in the frontend; event handling through the `Actions` registry.
-- Versions: SemVer in `CHANGELOG.md`; all images share one version.
+- Versions: Semantic Versioning in `CHANGELOG.md`; all images share one version.
+  PATCH = fixes, dependency bumps, docs/CI; MINOR = backwards-compatible features
+  (new endpoints, optional fields, settings); MAJOR = breaking API, data or
+  deployment changes. A kiosk-app release is followed at the same level
+  (`scripts/semver.sh`).
 
 ## Testing notes
 
