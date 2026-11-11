@@ -127,7 +127,7 @@ services:
       context: .
       dockerfile: docker/service.Dockerfile
       additional_contexts: { repo: . }
-      args: { SERVICE: system-service, PG_CLIENT_VERSION: "16" }
+      args: { SERVICE: system-service, PG_CLIENT: "1" }
     environment:
       <<: *service-env
       BACKUP_DIR: /app/data/backups

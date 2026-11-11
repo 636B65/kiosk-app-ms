@@ -93,7 +93,7 @@ jobs:
             repo=.
           build-args: |
             SERVICE=${{ matrix.image }}
-            PG_CLIENT_VERSION=${{ matrix.image == 'system-service' && '16' || '' }}
+            PG_CLIENT=${{ matrix.image == 'system-service' && '1' || '' }}
           push: false
           tags: kiosk-app-ms/${{ matrix.image }}:ci
 

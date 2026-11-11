@@ -4,22 +4,21 @@
 #       --build-context repo=. -t ghcr.io/636b65/kiosk-app-ms/order-service .
 #
 # SERVICE            directory under services/ (its package is the name with "-" -> "_")
-# PG_CLIENT_VERSION  installs pg_dump of that major version from apt.postgresql.org
-#                    (system-service: must be >= the Postgres server version)
+# PG_CLIENT          "1" installs pg_dump from Debian's own archive (system-service).
+#                    Debian trixie ships PostgreSQL 17, which dumps the 16 server
+#                    (pg_dump must be >= the server version). No third-party
+#                    repository or key download, so builds do not depend on it.
 FROM python:3.12-slim
 
 ARG SERVICE
-ARG PG_CLIENT_VERSION=""
+ARG PG_CLIENT=""
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
 
-RUN if [ -n "$PG_CLIENT_VERSION" ]; then \
-        apt-get update && apt-get install -y --no-install-recommends curl ca-certificates gnupg \
-        && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
-           | gpg --dearmor -o /usr/share/keyrings/postgresql.gpg \
-        && echo "deb [signed-by=/usr/share/keyrings/postgresql.gpg] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" \
-           > /etc/apt/sources.list.d/pgdg.list \
-        && apt-get update && apt-get install -y --no-install-recommends "postgresql-client-$PG_CLIENT_VERSION" \
-        && apt-get purge -y gnupg && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*; \
+RUN if [ -n "$PG_CLIENT" ]; then \
+        apt-get -o Acquire::Retries=5 update \
+        && apt-get -o Acquire::Retries=5 install -y --no-install-recommends postgresql-client \
+        && pg_dump --version \
+        && rm -rf /var/lib/apt/lists/*; \
     fi
 
 WORKDIR /app

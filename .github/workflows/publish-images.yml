@@ -84,7 +84,7 @@ jobs:
             repo=.
           build-args: |
             SERVICE=${{ matrix.image }}
-            PG_CLIENT_VERSION=${{ matrix.image == 'system-service' && '16' || '' }}
+            PG_CLIENT=${{ matrix.image == 'system-service' && '1' || '' }}
             APP_VERSION=${{ steps.meta.outputs.version }}
             GIT_COMMIT=${{ steps.rev.outputs.sha }}
           push: true
