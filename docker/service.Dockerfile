@@ -36,7 +36,7 @@ RUN --mount=type=bind,from=repo,target=/tmp/repo \
     sh /tmp/repo/scripts/release-info.sh /tmp/repo "$APP_VERSION" "$GIT_COMMIT" > /app/release.json
 
 RUN useradd --uid 10001 --create-home --shell /usr/sbin/nologin kiosk \
-    && mkdir -p /app/data && chown -R kiosk:kiosk /app
+    && mkdir -p /app/data/backups /app/data/product_images && chown -R kiosk:kiosk /app
 USER 10001
 
 ENV APP_MODULE=${SERVICE}
