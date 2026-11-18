@@ -187,3 +187,7 @@ kiosk-app release (the tracking PR sets it). Add a `## [x.y.z] - date` section t
 is green, `release.yml` tags the commit and `publish-images.yml` pushes the nine
 images as `x.y.z` and `latest` and creates the GitHub Release. Then bump the
 tags in `deploy/overlays/prod/kustomization.yaml` and let Argo CD sync.
+
+## License
+
+[MIT](LICENSE)
