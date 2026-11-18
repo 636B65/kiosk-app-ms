@@ -33,6 +33,11 @@ updates:
     commit-message:
       prefix: "deps(docker)"
       include: "scope"
+    ignore:
+      # The services target Python 3.12; moving to a new Python is a deliberate
+      # change (tests, lock files), so only new digests/patches come automatically.
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
 
   - package-ecosystem: "docker-compose"
     directory: "/"
@@ -41,6 +46,11 @@ updates:
     commit-message:
       prefix: "deps(compose)"
       include: "scope"
+    ignore:
+      # A new Postgres major needs a data upgrade (pg_upgrade/dump+restore) and a
+      # matching pg_dump in the system-service image; do it deliberately.
+      - dependency-name: "postgres"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
