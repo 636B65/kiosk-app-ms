@@ -1,4 +1,4 @@
-"""Fuzz customer username normalisation and validation (public kiosk input)."""
+"""Fuzz the public kiosk inputs: customer usernames and PINs."""
 
 import sys
 
@@ -8,11 +8,16 @@ with atheris.instrument_imports():
     import _paths  # noqa: F401
     from fastapi import HTTPException
 
+    from customer_service.pins import is_valid_pin
     from kiosk_common.usernames import MAX_USERNAME_LENGTH, normalize_username, validate_new_username
 
 
 def TestOneInput(data: bytes) -> None:
-    text = atheris.FuzzedDataProvider(data).ConsumeUnicodeNoSurrogates(256)
+    fdp = atheris.FuzzedDataProvider(data)
+    text = fdp.ConsumeUnicodeNoSurrogates(256)
+    pin = fdp.ConsumeUnicodeNoSurrogates(16)
+    if is_valid_pin(pin):
+        assert pin.isascii() and pin.isdigit() and 4 <= len(pin) <= 8
     name = normalize_username(text)
     # Normalising is idempotent and never leaves surrounding whitespace or capitals.
     assert normalize_username(name) == name

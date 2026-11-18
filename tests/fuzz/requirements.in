@@ -2,3 +2,4 @@
 #   pip-compile --generate-hashes --allow-unsafe tests/fuzz/requirements.in
 fastapi==0.163.1
 pydantic==2.14.3
+argon2-cffi==25.1.0

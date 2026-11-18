@@ -7,7 +7,16 @@ what `release.yml` tags and publishes.
 ## [1.0.1] - 2026-11-18
 
 ### Changed
-- Ported from kiosk-app v1.5.1 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.5.1)), a patch release: frontend synced; backend: see upstream/changes/v1.5.1.md.
+- Ported from kiosk-app v1.5.1 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.5.1)),
+  a patch release with supply-chain hardening only. The frontend is unchanged. The
+  hash-locked dependencies, digest-pinned base images, provenance attestations,
+  Scorecard, CodeQL, ClusterFuzzLite and the MIT license were already in place here.
+- New fuzz targets ported from kiosk-app's: customer PIN validation (in
+  `fuzz_usernames.py`) and request payloads for orders, products, stock counts and
+  users (`fuzz_schemas.py`).
+- Since 1.0.0: OpenSSF Scorecard and supply-chain hardening, the *Track kiosk-app*
+  workflow with Semantic Versioning, `pg_dump` from Debian, and Dependabot updates
+  (fastapi 0.163.1, psycopg, pydantic-settings, ruff).
 
 ## [1.0.0] - 2026-11-11
 

@@ -6,7 +6,9 @@ import sys
 _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 for _sub in (
     "libs/kiosk_common",
+    "services/auth-service",
     "services/catalog-service",
+    "services/customer-service",
     "services/order-service",
     "services/report-service",
 ):
