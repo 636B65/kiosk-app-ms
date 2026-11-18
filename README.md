@@ -1,6 +1,8 @@
 # kiosk-app-ms
 
 [![CI](https://github.com/636B65/kiosk-app-ms/actions/workflows/ci.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/ci.yml)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/636B65/kiosk-app-ms/badge)](https://scorecard.dev/viewer/?uri=github.com/636B65/kiosk-app-ms)
+[![CodeQL](https://github.com/636B65/kiosk-app-ms/actions/workflows/codeql.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/codeql.yml)
 [![Track kiosk-app](https://github.com/636B65/kiosk-app-ms/actions/workflows/track-kiosk-app.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/track-kiosk-app.yml)
 
 The self-service store kiosk from [kiosk-app](https://github.com/636B65/kiosk-app),
@@ -122,14 +124,19 @@ Releasing to prod = bump the image tags in `deploy/overlays/prod/kustomization.y
 
 ```bash
 python3.12 -m venv .venv && . .venv/bin/activate
-pip install -r requirements-dev.txt -e libs/kiosk_common
+pip install --require-hashes -r requirements-dev.txt   # kiosk_common is on pytest's pythonpath
 ruff check .                     # lint
 pytest -v                        # 53 tests: 40 cross-service integration tests (all services in one process, SQLite) + unit tests
 node --check frontend/js/*.js    # frontend syntax (no build step)
 kubectl kustomize deploy/overlays/dev | kubeconform -strict -ignore-missing-schemas
 
 # one service on its own (SQLite under data/)
-cd services/order-service && uvicorn order_service.main:create_app --factory --reload
+cd services/order-service && PYTHONPATH=../../libs/kiosk_common uvicorn order_service.main:create_app --factory --reload
+
+# change a dependency: edit requirements*.in, then regenerate the hash-locked files
+pip install pip-tools
+pip-compile --generate-hashes --allow-unsafe requirements.in
+pip-compile --generate-hashes --allow-unsafe requirements-dev.in
 ```
 
 The integration tests wire every service together in-process (`tests/integration/conftest.py`),
@@ -150,6 +157,16 @@ deploy/overlays/{dev,prod}  environments; deploy/argocd/ Applications + Applicat
 tests/integration/       cross-service tests through an in-process gateway
 .github/workflows/       ci.yml, publish-images.yml, release.yml
 ```
+
+## Security
+
+See [SECURITY.md](SECURITY.md) for reporting vulnerabilities. The repository is
+checked by [OpenSSF Scorecard](https://scorecard.dev/viewer/?uri=github.com/636B65/kiosk-app-ms),
+CodeQL and ClusterFuzzLite (Atheris fuzzers in `tests/fuzz/`). Actions are
+pinned to commit SHAs, base images to digests and Python dependencies to hashes
+(Dependabot updates all of them), workflows run with read-only tokens unless a
+job needs more, and every published image has a signed build provenance
+attestation (`gh attestation verify oci://ghcr.io/636b65/kiosk-app-ms/<service>:<version> -R 636B65/kiosk-app-ms`).
 
 ## Following kiosk-app
 

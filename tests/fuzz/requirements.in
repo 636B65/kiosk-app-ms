@@ -1,0 +1,4 @@
+# Dependencies of the fuzzed modules (ClusterFuzzLite). Regenerate after edits:
+#   pip-compile --generate-hashes --allow-unsafe tests/fuzz/requirements.in
+fastapi==0.162.4
+pydantic==2.14.3

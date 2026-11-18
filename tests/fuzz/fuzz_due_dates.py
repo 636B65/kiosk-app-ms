@@ -1,0 +1,28 @@
+"""Fuzz parsing of the store-wide payment due date setting."""
+
+import sys
+
+import atheris
+
+with atheris.instrument_imports():
+    import _paths  # noqa: F401
+
+    from order_service.due_dates import due_time_from_settings, parse_due_date
+
+
+def TestOneInput(data: bytes) -> None:
+    value = atheris.FuzzedDataProvider(data).ConsumeUnicodeNoSurrogates(64)
+    parsed = parse_due_date(value)
+    due = due_time_from_settings({"payment_due_date": value})
+    assert (parsed is None) == (due is None)
+    if due is not None:
+        assert due.date() == parsed and (due.hour, due.minute, due.second) == (23, 59, 59)
+
+
+def main() -> None:
+    atheris.Setup(sys.argv, TestOneInput)
+    atheris.Fuzz()
+
+
+if __name__ == "__main__":
+    main()

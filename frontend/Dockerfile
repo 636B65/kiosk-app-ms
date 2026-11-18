@@ -1,6 +1,6 @@
 # Kiosk UI + API gateway. Runs as the unprivileged nginx user on port 8080;
 # TLS terminates at the Kubernetes Ingress (or a reverse proxy in front of compose).
-FROM nginxinc/nginx-unprivileged:1.27-alpine
+FROM nginxinc/nginx-unprivileged:stable-alpine@sha256:f5116ed4606f3eb015dd4a8e28cb9b351476dc0ad4bc6e9f93b19cec130cdf03
 
 # Only ${NGINX_*} placeholders are substituted in the template.
 ENV NGINX_ENVSUBST_FILTER=^NGINX_

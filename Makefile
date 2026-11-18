@@ -1,7 +1,7 @@
 .PHONY: install lint test check-js manifests up down
 
 install:
-	pip install -r requirements-dev.txt -e libs/kiosk_common
+	pip install --require-hashes -r requirements-dev.txt
 
 lint:
 	ruff check .

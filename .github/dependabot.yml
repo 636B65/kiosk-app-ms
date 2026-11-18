@@ -1,0 +1,53 @@
+# Dependabot version updates for every pinned dependency in this repository.
+# Python requirements are pip-compile lock files (requirements*.in -> *.txt with
+# hashes); Dependabot regenerates them. Actions are pinned to commit SHAs and
+# images to digests; Dependabot updates the SHA/digest and the version comment.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(pip)"
+      include: "scope"
+    groups:
+      python:
+        patterns: ["*"]
+
+  - package-ecosystem: "pip"
+    directory: "/tests/fuzz"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(pip)"
+      include: "scope"
+    groups:
+      fuzz:
+        patterns: ["*"]
+
+  - package-ecosystem: "docker"
+    directories: ["/docker", "/frontend", "/.clusterfuzzlite"]
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(docker)"
+      include: "scope"
+
+  - package-ecosystem: "docker-compose"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(compose)"
+      include: "scope"
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "deps(actions)"
+    groups:
+      actions:
+        patterns: ["*"]

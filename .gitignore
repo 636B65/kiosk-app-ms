@@ -13,3 +13,6 @@ data/
 pin_pepper.key
 node_modules/
 upstream-src/
+crash-*
+leak-*
+timeout-*

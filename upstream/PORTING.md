@@ -44,7 +44,7 @@ Your job: make every feature, bug fix and security fix of that diff work here.
    on its own (`scripts/semver.sh` computes levels and bumps). Update the test
    count in README.md if it changed.
 7. Run and make pass, fixing your code (never weakening or skipping tests):
-     pip install -r requirements-dev.txt -e libs/kiosk_common
+     pip install --require-hashes -r requirements-dev.txt
      ruff check .
      pytest -q
      node --check frontend/js/*.js

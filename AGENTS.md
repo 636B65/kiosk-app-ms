@@ -14,7 +14,7 @@ the frontend in `frontend/js/`.
 ## Quick commands
 
 ```bash
-pip install -r requirements-dev.txt -e libs/kiosk_common
+pip install --require-hashes -r requirements-dev.txt
 ruff check .                                   # lint (isort rules included)
 pytest -v                                      # all services in one process, SQLite
 node --check frontend/js/*.js
@@ -78,3 +78,14 @@ Run all four checks before finishing a change.
 `css/` and `js/` are copies made by `scripts/sync-frontend.sh`; put local UI
 differences in that script, never only in the copied files. Sync PRs come from
 `.github/workflows/track-kiosk-app.yml`; port backend changes with `upstream/PORTING.md`.
+
+## Supply chain (OpenSSF Scorecard)
+
+- Dependencies: edit `requirements*.in` / `tests/fuzz/requirements.in`, regenerate the
+  hash-locked `.txt` with `pip-compile --generate-hashes --allow-unsafe`; always
+  `pip install --require-hashes -r ...`. `kiosk_common` is never pip-installed (PYTHONPATH).
+- Workflows: top-level `permissions` read-only, write scopes per job; every
+  `uses:` pinned to a full commit SHA with the version as a comment; no
+  `${{ }}` of untrusted input inside `run:` (pass it through `env:`).
+- Dockerfile `FROM` lines are pinned by digest. Downloads in workflows are checksum-verified.
+- Fuzz targets live in `tests/fuzz/` (Atheris, built by `.clusterfuzzlite/build.sh`).
