@@ -18,10 +18,10 @@ anyio==4.16.0 \
     # via
     #   fastapi
     #   starlette
-fastapi==0.162.4 \
-    --hash=sha256:4abdb1ef367090678d8bc664631df432ae7a1bfe7709c37547d3606e667650e3 \
-    --hash=sha256:f093bc306d3958278d30ffd14f3834ca3d9b144fbb898ab5c9b652cf6e75f869
-    # via -r tests/fuzz/requirements.in
+fastapi==0.163.1 \
+    --hash=sha256:3d364b02a68b67292e833ff2dfed3b8dc3aeadf73e271c15316c6c166668792f \
+    --hash=sha256:68f2d8050f5c3583121c0d203046cc7def5c16a7d6c43a0e7707a8ea610fe2d3
+    # via -r requirements.in
 idna==3.20 \
     --hash=sha256:a7db850025b95ded1eae8a46181a1a6c56c92c96f0e2b005d9ff8dc0210cab44 \
     --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
@@ -34,7 +34,7 @@ pydantic==2.14.3 \
     --hash=sha256:1054f237f4d4733e5a30e1e2333bd33a2004ab9ab1510bd053a9a31bb48e232d \
     --hash=sha256:3f7b347782ab7e4cf4c798496ae3a82787d9f21ec12676a9c564355eeef8daa8
     # via
-    #   -r tests/fuzz/requirements.in
+    #   -r requirements.in
     #   fastapi
 pydantic-core==2.50.4 \
     --hash=sha256:0001d6920e3a5d92758cda460d6dc9f918a78ad6d5d092f1c8b5395e6b775356 \
