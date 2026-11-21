@@ -22,6 +22,12 @@ what `release.yml` tags and publishes.
 - Postgres 16 pinned to the current `postgres:16-alpine` digest (compose and Kubernetes).
 - Actions: ossf/scorecard-action 2.6.0, github/codeql-action 4.39.4.
 
+### Fixed
+- **Customer PINs with a trailing newline were accepted** (`"1234\n"` passed the 4-8 digit
+  rule because `$` matches before a final newline). Such a PIN could never be entered at the
+  kiosk again, which locked the customer out until staff reset it. The check now requires
+  the whole value to be digits (`re.fullmatch`). Found by the new ClusterFuzzLite PIN fuzzer.
+
 ### Changed
 - Ported from kiosk-app v1.5.2 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.5.2)),
   the same security patch release. The frontend code is unchanged; the backend changes

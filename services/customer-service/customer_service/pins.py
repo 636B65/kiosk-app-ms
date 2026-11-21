@@ -15,7 +15,8 @@ import secrets
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
 
-PIN_PATTERN = re.compile(r"^[0-9]{4,8}$")
+# fullmatch, not match: "$" also matches before a trailing newline ("1234\n").
+PIN_PATTERN = re.compile(r"[0-9]{4,8}")
 MAX_FAILED_ATTEMPTS = 5
 LOCK_MINUTES = 15
 PEPPER_FILENAME = "pin_pepper.key"
@@ -24,7 +25,7 @@ _hasher = PasswordHasher(time_cost=3, memory_cost=64 * 1024, parallelism=4, hash
 
 
 def is_valid_pin(pin: object) -> bool:
-    return isinstance(pin, str) and bool(PIN_PATTERN.match(pin))
+    return isinstance(pin, str) and PIN_PATTERN.fullmatch(pin) is not None
 
 
 class PinHasher:

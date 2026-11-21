@@ -251,6 +251,9 @@ def test_self_mark_paid_is_disabled_by_default(client, admin_headers):
 def test_pin_flow(client, admin_headers, stack):
     cola = product_by_name(client, "Cola")
     assert client.post("/api/customers/bob/pin", json={"pin": "12"}).status_code == 422
+    # A trailing newline (or other non-digits) must not slip past the PIN rule.
+    for bad in ("1234\n", "12345\n", "١٢٣٤", " 1234", "1234 "):
+        assert client.post("/api/customers/bob/pin", json={"pin": bad}).status_code == 422, repr(bad)
     assert client.post("/api/customers/bob/pin", json={"pin": "1234"}).json() == {"username": "bob", "has_pin": True}
 
     # Lookup and checkout now need the PIN.
