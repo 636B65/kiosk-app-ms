@@ -6,8 +6,27 @@ what `release.yml` tags and publishes.
 
 ## [1.0.2] - 2026-11-21
 
+### Security
+- **nginx 1.30.6 -> 1.31.9** in the frontend/gateway image. 1.31.9 fixes, among others,
+  CVE-2026-123007 (HTTP/2 flow-control overflow), CVE-2026-123633 / CVE-2026-121810
+  (HTTP/2 and HTTP/3 use-after-free), CVE-2026-125283 (`try_files` + `alias` buffer
+  overflow), CVE-2026-123634 (resolver use-after-free) and CVE-2026-120967 (stream SNI).
+  `nginxinc/nginx-unprivileged` had no build with these fixes, so the image is now built
+  on the official `nginx:alpine` and made unprivileged in our Dockerfile. It still runs as
+  uid 101 on port 8080, with pid and temp files in `/tmp`, so deployments are unchanged.
+- Every image applies the OS security updates published after its base image was built
+  (`apt-get upgrade` / `apk upgrade` at build time).
+- Python: fastapi 0.165.0, SQLAlchemy 2.1.9, pydantic 2.14.4, python-multipart 0.0.34 and
+  refreshed transitive locks (`pip-audit`: no known vulnerabilities); dev: ruff 0.17.6,
+  pyyaml 6.0.4.
+- Postgres 16 pinned to the current `postgres:16-alpine` digest (compose and Kubernetes).
+- Actions: ossf/scorecard-action 2.6.0, github/codeql-action 4.39.4.
+
 ### Changed
-- Ported from kiosk-app v1.5.2 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.5.2)), a patch release: frontend synced; backend: see upstream/changes/v1.5.2.md.
+- Ported from kiosk-app v1.5.2 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.5.2)),
+  the same security patch release. The frontend code is unchanged; the backend changes
+  (lock files, image updates) are covered above. The e2e Playwright bump has no
+  counterpart here.
 
 ## [1.0.1] - 2026-11-18
 
