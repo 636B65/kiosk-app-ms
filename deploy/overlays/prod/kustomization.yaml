@@ -11,23 +11,23 @@ resources:
 
 images:
   - name: ghcr.io/636b65/kiosk-app-ms/auth-service
-    newTag: 1.0.2
+    newTag: 1.0.3
   - name: ghcr.io/636b65/kiosk-app-ms/catalog-service
-    newTag: 1.0.2
+    newTag: 1.0.3
   - name: ghcr.io/636b65/kiosk-app-ms/customer-service
-    newTag: 1.0.2
+    newTag: 1.0.3
   - name: ghcr.io/636b65/kiosk-app-ms/order-service
-    newTag: 1.0.2
+    newTag: 1.0.3
   - name: ghcr.io/636b65/kiosk-app-ms/settings-service
-    newTag: 1.0.2
+    newTag: 1.0.3
   - name: ghcr.io/636b65/kiosk-app-ms/audit-service
-    newTag: 1.0.2
+    newTag: 1.0.3
   - name: ghcr.io/636b65/kiosk-app-ms/report-service
-    newTag: 1.0.2
+    newTag: 1.0.3
   - name: ghcr.io/636b65/kiosk-app-ms/system-service
-    newTag: 1.0.2
+    newTag: 1.0.3
   - name: ghcr.io/636b65/kiosk-app-ms/frontend
-    newTag: 1.0.2
+    newTag: 1.0.3
 
 replicas:
   - name: auth-service

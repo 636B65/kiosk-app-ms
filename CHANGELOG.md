@@ -4,6 +4,15 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); the newest `## [x.y.z]` heading is
 what `release.yml` tags and publishes.
 
+## [1.0.3] - 2026-11-21
+
+### Changed
+- Ported from kiosk-app v1.5.3 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.5.3)),
+  a patch release: customer PINs with a trailing newline are rejected. That fix was found
+  here and has been in kiosk-app-ms since 1.0.2 (customer-service `pins.py` and the PIN flow
+  test), so there's nothing new to port. This release only records that kiosk-app-ms is
+  in step with kiosk-app 1.5.3. The frontend is unchanged.
+
 ## [1.0.2] - 2026-11-21
 
 ### Security
