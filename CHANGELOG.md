@@ -4,6 +4,25 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); the newest `## [x.y.z]` heading is
 what `release.yml` tags and publishes.
 
+## [1.0.4] - 2026-11-24
+
+### Security
+- **nginx 1.31.9 -> 1.31.10** in the frontend/gateway image: CVE-2026-132779 (excessive CPU
+  with `ssl_early_data`; the gateway does not terminate TLS, but upgrade anyway) and CPU
+  hogging with SSL connections to backends.
+- **Python 3.12.15 -> 3.12.16** in every service image, **Postgres 16.15 -> 16.16**
+  (compose and Kubernetes), current ClusterFuzzLite base image, github/codeql-action 4.39.5.
+- The Python dependencies are already current; `pip-audit` reports no known vulnerabilities.
+
+### Fixed
+- Scorecard workflow: `ossf/scorecard-action` pinned back to v2.5.0, because the published
+  v2.6.0 image is missing from ghcr.io (the job failed at `docker pull`). Dependabot skips
+  2.6.0 only.
+
+### Changed
+- Ported from kiosk-app v1.5.4 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.5.4)),
+  the same base-image update; nothing else to port.
+
 ## [1.0.3] - 2026-11-21
 
 ### Changed
