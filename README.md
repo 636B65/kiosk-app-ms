@@ -1,9 +1,32 @@
 # kiosk-app-ms
 
 [![CI](https://github.com/636B65/kiosk-app-ms/actions/workflows/ci.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/ci.yml)
-[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/636B65/kiosk-app-ms/badge)](https://scorecard.dev/viewer/?uri=github.com/636B65/kiosk-app-ms)
-[![CodeQL](https://github.com/636B65/kiosk-app-ms/actions/workflows/codeql.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/codeql.yml)
+[![Release](https://img.shields.io/github/v/release/636B65/kiosk-app-ms?sort=semver&logo=github)](https://github.com/636B65/kiosk-app-ms/releases/latest)
+[![Publish images](https://github.com/636B65/kiosk-app-ms/actions/workflows/publish-images.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/publish-images.yml)
+[![Last commit](https://img.shields.io/github/last-commit/636B65/kiosk-app-ms?logo=git&logoColor=white)](https://github.com/636B65/kiosk-app-ms/commits/main)
+[![License: MIT](https://img.shields.io/github/license/636B65/kiosk-app-ms)](LICENSE)
+
+[![Follows kiosk-app](https://img.shields.io/github/v/release/636B65/kiosk-app?sort=semver&label=follows%20kiosk-app&logo=github)](https://github.com/636B65/kiosk-app/releases/latest)
 [![Track kiosk-app](https://github.com/636B65/kiosk-app-ms/actions/workflows/track-kiosk-app.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/track-kiosk-app.yml)
+[![Semantic Versioning](https://img.shields.io/badge/semver-2.0.0-3F4551?logo=semver&logoColor=white)](https://semver.org/)
+
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/636B65/kiosk-app-ms/badge)](https://scorecard.dev/viewer/?uri=github.com/636B65/kiosk-app-ms)
+[![Scorecard workflow](https://github.com/636B65/kiosk-app-ms/actions/workflows/scorecard.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/scorecard.yml)
+[![CodeQL](https://github.com/636B65/kiosk-app-ms/actions/workflows/codeql.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/codeql.yml)
+[![ClusterFuzzLite](https://github.com/636B65/kiosk-app-ms/actions/workflows/cflite.yml/badge.svg)](https://github.com/636B65/kiosk-app-ms/actions/workflows/cflite.yml)
+[![Build provenance](https://img.shields.io/badge/build%20provenance-attested-brightgreen?logo=github)](SECURITY.md)
+[![Dependabot](https://img.shields.io/badge/Dependabot-enabled-025E8C?logo=dependabot&logoColor=white)](.github/dependabot.yml)
+[![Security policy](https://img.shields.io/badge/security-policy-blue?logo=github)](SECURITY.md)
+
+[![Kubernetes](https://img.shields.io/badge/Kubernetes-ready-326CE5?logo=kubernetes&logoColor=white)](deploy/)
+[![Argo CD](https://img.shields.io/badge/GitOps-Argo%20CD-EF7B4D?logo=argo&logoColor=white)](deploy/argocd)
+[![Kustomize](https://img.shields.io/badge/Kustomize-base%20%2B%20overlays-326CE5?logo=kubernetes&logoColor=white)](deploy/base)
+[![Docker images on GHCR](https://img.shields.io/badge/ghcr.io-9%20images-2496ED?logo=docker&logoColor=white)](https://github.com/636B65?tab=packages&repo_name=kiosk-app-ms)
+[![Python 3.12](https://img.shields.io/badge/python-3.12-3776AB?logo=python&logoColor=white)](docker/service.Dockerfile)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![PostgreSQL 16](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)](deploy/base/postgres)
+[![nginx](https://img.shields.io/badge/nginx-009639?logo=nginx&logoColor=white)](frontend/nginx/default.conf.template)
+[![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 
 The self-service store kiosk from [kiosk-app](https://github.com/636B65/kiosk-app),
 rebuilt as microservices for Kubernetes. Customers pick products on a touchscreen,
