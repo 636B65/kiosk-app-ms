@@ -3,9 +3,10 @@
 #
 # Built on the official nginx image and made unprivileged here (the same changes
 # nginxinc/nginx-unprivileged applies), because that image lagged behind nginx
-# security releases. nginx 1.31.9 (mainline) fixes CVE-2026-123007/-123633/-121810
-# (HTTP/2, HTTP/3), CVE-2026-125283 (try_files + alias) and more.
-FROM nginx:alpine@sha256:fb4658584bd9a916ffb6f6e365f97c25cfdb2923801f551ea08356e695f14ff7
+# security releases. nginx 1.31.10 (mainline) includes the 1.31.9 fixes for
+# CVE-2026-123007/-123633/-121810 (HTTP/2, HTTP/3), CVE-2026-125283 (try_files +
+# alias) and 1.31.10's CVE-2026-132779 (ssl_early_data).
+FROM nginx:alpine@sha256:b50897d5c7b1aa08067c3d90c5e8b3e47ec4e3c91c91446f67820228f7b41e34
 
 # Alpine security fixes released after the base image was built, then run
 # without root: no "user" directive, pid and temp files in /tmp, and the
