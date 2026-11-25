@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -143,6 +143,60 @@ class CustomersStatsOut(BaseModel):
     customers: dict[str, CustomerSummary] = {}
 
 
+MAX_MONEY_AMOUNT = 10_000_000
+
+
 class SettleIn(BaseModel):
     actor: str = Field(max_length=200)
     action: str = Field(max_length=200)
+    # What the customer paid on top of the debt; booked in the same transaction.
+    customer_id: Optional[int] = None
+    extra_amount: float = Field(default=0.0, ge=0, le=MAX_MONEY_AMOUNT)
+    extra_note: str = Field(default="", max_length=200)
+
+
+class ExtraPaymentCreate(BaseModel):
+    """Internal: the customer service books an extra payment without settling."""
+
+    actor: str = Field(max_length=200)
+    customer_id: Optional[int] = None
+    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
+    note: str = Field(default="", max_length=200)
+
+
+class PurchaseIn(BaseModel):
+    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
+    # Any past date: a batch bought earlier can be entered afterwards. Default today (UTC).
+    purchased_on: Optional[date] = None
+    supplier: str = Field(default="", max_length=100)
+    note: str = Field(default="", max_length=200)
+
+
+class PurchaseUpdate(BaseModel):
+    amount: Optional[float] = Field(default=None, gt=0, le=MAX_MONEY_AMOUNT)
+    purchased_on: Optional[date] = None
+    supplier: Optional[str] = Field(default=None, max_length=100)
+    note: Optional[str] = Field(default=None, max_length=200)
+
+
+class PurchaseOut(BaseModel):
+    id: int
+    purchased_on: date
+    amount: float
+    supplier: str = ""
+    note: str = ""
+    created_by: str = ""
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExtraPaymentOut(BaseModel):
+    id: int
+    username: str
+    amount: float
+    note: str = ""
+    created_by: str = ""
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)

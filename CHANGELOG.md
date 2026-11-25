@@ -6,8 +6,32 @@ what `release.yml` tags and publishes.
 
 ## [1.1.0] - 2026-11-25
 
-### Changed
-- Ported from kiosk-app v1.6.0 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.6.0)), a minor release: frontend synced; backend: see upstream/changes/v1.6.0.md.
+### Added
+- Ported from kiosk-app v1.6.0 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.6.0)),
+  a minor release; the frontend is synced and the whole backend is ported:
+- **Purchases and the store balance.** The order service owns `purchases` (`/api/purchases`, a
+  batch can be entered with any earlier date and edited or deleted later, audited as
+  `purchase.*`). The report service computes the **store balance** from the order, purchase and
+  extra-payment rows (`GET /api/reports/balance`, `summary.store_balance`, `store_balance` and
+  `purchases` sections in the CSV): *paid orders + extra payments - purchases*, with the projected
+  balance if everybody pays and plus / minus / even once nobody owes anything. Shrinkage is taken
+  from the catalog's counts and is shown next to the extra payments (information only).
+- **Extra payments.** `POST /api/customers/{u}/extra-payment`, `/api/extra-payments` (list, delete)
+  and `reset-payment` with an optional `{"extra_amount", "note"}` body (no body still works). The
+  customer service sends the extra amount in the same call that settles the orders, so the order
+  service books both in one transaction. An extra payment is store income, never customer credit.
+- **Pay screen.** The settings service has the new settings `payment_methods` and
+  `pay_instructions`, validates and canonicalises them on save, and accepts QR code uploads
+  (`POST /api/settings/payment-qr`). Unlike the monolith, which keeps the QR files in its image
+  folder, the images are stored in the settings database (no extra volume, included in the
+  Postgres backup) and served publicly at `/api/images/pay-*`; the gateway sends that prefix to
+  the settings service and every other `/api/images` path to the catalog.
+
+### Tests
+- 63 tests (50 integration; new `tests/integration/test_money.py`: purchases, the balance as paid
+  + extra - purchases incl. paid -> pending/cancelled, plus/minus/even, extra payments are no
+  customer credit, shrinkage coverage, summary and CSV, payment method validation, QR upload,
+  serving and cleanup). The route sweep and the gateway table cover the new routes.
 
 ## [1.0.4] - 2026-11-24
 

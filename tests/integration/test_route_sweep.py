@@ -15,6 +15,7 @@ PUBLIC_ENDPOINTS = {
     ("catalog", "GET", "/api/products/{product_id}"),
     ("catalog", "GET", "/api/products/barcode/{barcode}"),
     ("settings", "GET", "/api/settings"),
+    ("settings", "GET", "/api/images/{name}"),
     ("orders", "POST", "/api/orders"),
     ("customers", "GET", "/api/customers/suggest"),
     ("customers", "GET", "/api/customers/{username}"),

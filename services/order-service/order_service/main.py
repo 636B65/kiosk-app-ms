@@ -8,6 +8,7 @@ from kiosk_common.auth import AuthVerifier, introspect_resolver
 from kiosk_common.db import Database
 from kiosk_common.http import ServiceClient
 from kiosk_common.outbox import OutboxRelay
+from order_service import money_routers
 from order_service.config import Config
 from order_service.models import Base, Outbox
 from order_service.routers import STOCK_RELEASE_TOPIC, internal, router
@@ -56,4 +57,7 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.relay = relay
     app.include_router(router)
     app.include_router(internal)
+    app.include_router(money_routers.purchases)
+    app.include_router(money_routers.extra_payments)
+    app.include_router(money_routers.internal)
     return app

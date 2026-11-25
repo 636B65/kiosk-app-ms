@@ -61,10 +61,10 @@ deployed with Kustomize and Argo CD.
 | `auth-service` | admin users, login, JWT | `/api/auth/*`, `/api/users` |
 | `catalog-service` | categories, products, stock, restocks, counts, images | `/api/categories`, `/api/products`, `/api/restocks`, `/api/inventory`, `/api/images` |
 | `customer-service` | customers, PINs | `/api/customers/*` |
-| `order-service` | orders, settlement, customer statistics | `/api/orders` |
-| `settings-service` | store-wide settings | `/api/settings` |
+| `order-service` | orders, settlement, customer statistics, purchases, extra payments | `/api/orders`, `/api/purchases`, `/api/extra-payments` |
+| `settings-service` | store-wide settings, payment info (Pay screen) and its QR images | `/api/settings`, `/api/images/pay-*` |
 | `audit-service` | audit log | `/api/audit` |
-| `report-service` | reports and CSV exports (no database) | `/api/reports/*` |
+| `report-service` | reports, the store balance and CSV exports (no database) | `/api/reports/*` |
 | `system-service` | aggregated health, System page, backups (no database) | `/api/health`, `/api/system/*` |
 | `frontend` | kiosk/admin UI, API gateway | everything else |
 
@@ -149,7 +149,7 @@ Releasing to prod = bump the image tags in `deploy/overlays/prod/kustomization.y
 python3.12 -m venv .venv && . .venv/bin/activate
 pip install --require-hashes -r requirements-dev.txt   # kiosk_common is on pytest's pythonpath
 ruff check .                     # lint
-pytest -v                        # 53 tests: 40 cross-service integration tests (all services in one process, SQLite) + unit tests
+pytest -v                        # 63 tests: 50 cross-service integration tests (all services in one process, SQLite) + unit tests
 node --check frontend/js/*.js    # frontend syntax (no build step)
 kubectl kustomize deploy/overlays/dev | kubeconform -strict -ignore-missing-schemas
 
