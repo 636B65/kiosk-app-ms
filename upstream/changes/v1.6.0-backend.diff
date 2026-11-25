@@ -1,0 +1,1338 @@
+diff --git a/backend/main.py b/backend/main.py
+index 8429257..58c1d70 100644
+--- a/backend/main.py
++++ b/backend/main.py
+@@ -16,9 +16,11 @@ from routers import (
+     auth,
+     categories,
+     customers,
++    extra_payments,
+     inventory,
+     orders,
+     products,
++    purchases,
+     reports,
+     restocks,
+     settings,
+@@ -72,6 +74,8 @@ app.include_router(categories.router)
+ app.include_router(customers.router)
+ app.include_router(products.router)
+ app.include_router(orders.router)
++app.include_router(purchases.router)
++app.include_router(extra_payments.router)
+ app.include_router(reports.router)
+ app.include_router(settings.router)
+ app.include_router(users.router)
+diff --git a/backend/models.py b/backend/models.py
+index dacb686..4ae212d 100644
+--- a/backend/models.py
++++ b/backend/models.py
+@@ -210,6 +210,42 @@ class StockAdjustment(Base):
+     created_at = Column(DateTime, default=utcnow, index=True)
+ 
+ 
++class Purchase(Base):
++    """Money the store spent on goods (one row per buying trip or invoice).
++
++    `purchased_on` may be any past date, so a batch bought earlier can be entered
++    afterwards; it is the shop's cost side of the store balance (see reports.py).
++    """
++
++    __tablename__ = "purchases"
++
++    id = Column(Integer, primary_key=True, index=True)
++    purchased_on = Column(Date, nullable=False, default=lambda: utcnow().date(), index=True)
++    amount = Column(Float, nullable=False)
++    supplier = Column(String, default="")
++    note = Column(String, default="")
++    created_by = Column(String, default="")
++    created_at = Column(DateTime, default=utcnow)
++
++
++class ExtraPayment(Base):
++    """What a customer paid on top of their debt.
++
++    Store income (it is not credit on the customer's balance); it counts toward
++    covering shrinkage. `username` is kept so the entry stays readable.
++    """
++
++    __tablename__ = "extra_payments"
++
++    id = Column(Integer, primary_key=True, index=True)
++    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True, index=True)
++    username = Column(String, nullable=False, index=True)
++    amount = Column(Float, nullable=False)
++    note = Column(String, default="")
++    created_by = Column(String, default="")
++    created_at = Column(DateTime, default=utcnow, index=True)
++
++
+ class AuditLog(Base):
+     __tablename__ = "audit_log"
+ 
+diff --git a/backend/payment_info.py b/backend/payment_info.py
+new file mode 100644
+index 0000000..6f98869
+--- /dev/null
++++ b/backend/payment_info.py
+@@ -0,0 +1,110 @@
++"""How customers can pay, as the admin wants it shown on the kiosk's "Pay" screen.
++
++The setting `payment_methods` holds a JSON list of methods, `pay_instructions` a free
++text above them. Both are public (the kiosk shows them to anyone), so the admin's input
++is validated and stored in one canonical form, and QR codes are uploaded images served from
++the product image folder (the CSP allows `img-src 'self'` only; the kiosk runs air-gapped).
++"""
++
++import json
++import os
++import re
++import unicodedata
++
++METHODS_SETTING = "payment_methods"
++INSTRUCTIONS_SETTING = "pay_instructions"
++
++METHOD_TYPES = ("bank", "phone", "qr", "link", "text")
++MAX_METHODS = 10
++MAX_LABEL = 40
++MAX_VALUE = 300
++MAX_NOTE = 300
++MAX_INSTRUCTIONS = 500
++
++# Uploaded QR codes: pay-<32 hex>.<ext> (written by the upload endpoint, nothing else matches).
++QR_NAME_RE = re.compile(r"^pay-[0-9a-f]{32}\.(png|jpg|webp|gif)$")
++_LINK_RE = re.compile(r"^https?://\S+$", re.IGNORECASE)
++
++
++class PaymentInfoError(ValueError):
++    pass
++
++
++def _text(value, field: str, limit: int, multiline: bool = False) -> str:
++    if value is None:
++        return ""
++    if not isinstance(value, str):
++        raise PaymentInfoError(f"{field} must be text")
++    value = value.strip()
++    if len(value) > limit:
++        raise PaymentInfoError(f"{field} must be at most {limit} characters")
++    for ch in value:
++        if multiline and ch in "\n\r\t":
++            continue
++        if unicodedata.category(ch).startswith("C"):
++            raise PaymentInfoError(f"{field} contains characters that are not allowed")
++    return value
++
++
++def normalize_methods(raw: str, images_dir: str) -> str:
++    """Validate the JSON list and return it in canonical form; PaymentInfoError if wrong."""
++    if not raw or not raw.strip():
++        return "[]"
++    try:
++        data = json.loads(raw)
++    except ValueError as exc:
++        raise PaymentInfoError("payment_methods must be valid JSON") from exc
++    if not isinstance(data, list):
++        raise PaymentInfoError("payment_methods must be a list")
++    if len(data) > MAX_METHODS:
++        raise PaymentInfoError(f"At most {MAX_METHODS} payment methods are allowed")
++    methods = []
++    for index, item in enumerate(data, 1):
++        if not isinstance(item, dict):
++            raise PaymentInfoError(f"Payment method {index} must be an object")
++        kind = item.get("type")
++        if kind not in METHOD_TYPES:
++            raise PaymentInfoError(
++                f"Payment method {index}: type must be one of {', '.join(METHOD_TYPES)}"
++            )
++        label = _text(item.get("label"), "label", MAX_LABEL)
++        value = _text(item.get("value"), "value", MAX_VALUE, multiline=(kind == "text"))
++        note = _text(item.get("note"), "note", MAX_NOTE, multiline=True)
++        image = _text(item.get("image"), "image", 80)
++        enabled = item.get("enabled", True)
++        if not isinstance(enabled, bool):
++            raise PaymentInfoError(f"Payment method {index}: enabled must be true or false")
++        if kind == "qr":
++            if not QR_NAME_RE.match(image):
++                raise PaymentInfoError(f"Payment method {index}: upload a QR code image first")
++            if not os.path.isfile(os.path.join(images_dir, image)):
++                raise PaymentInfoError(f"Payment method {index}: the QR code image is missing")
++        else:
++            image = ""
++            if not value:
++                raise PaymentInfoError(f"Payment method {index}: a value is required")
++        if kind == "link" and not _LINK_RE.match(value):
++            raise PaymentInfoError(f"Payment method {index}: a link must start with http:// or https://")
++        methods.append(
++            {"type": kind, "label": label, "value": value, "note": note, "image": image, "enabled": enabled}
++        )
++    return json.dumps(methods, ensure_ascii=False, separators=(",", ":"))
++
++
++def normalize_instructions(raw: str) -> str:
++    return _text(raw, "pay_instructions", MAX_INSTRUCTIONS, multiline=True)
++
++
++def qr_images(raw: str | None) -> set[str]:
++    """Uploaded QR files a stored payment_methods value refers to (tolerates anything)."""
++    try:
++        data = json.loads(raw or "[]")
++    except ValueError:
++        return set()
++    if not isinstance(data, list):
++        return set()
++    return {
++        item["image"]
++        for item in data
++        if isinstance(item, dict) and isinstance(item.get("image"), str) and QR_NAME_RE.match(item["image"])
++    }
+diff --git a/backend/routers/customers.py b/backend/routers/customers.py
+index 74859c3..209116f 100644
+--- a/backend/routers/customers.py
++++ b/backend/routers/customers.py
+@@ -3,7 +3,7 @@ from collections import defaultdict
+ from datetime import timedelta
+ from typing import List, Optional
+ 
+-from fastapi import APIRouter, Depends, Header, HTTPException
++from fastapi import APIRouter, Body, Depends, Header, HTTPException
+ from sqlalchemy import func
+ from sqlalchemy.orm import Session, joinedload
+ 
+@@ -11,15 +11,18 @@ import audit
+ import pins
+ from database import get_db
+ from due_dates import get_due_date
+-from models import Customer, Order, OrderItem, Product, Setting, User
++from models import Customer, ExtraPayment, Order, OrderItem, Product, Setting, User
+ from schemas import (
+     CustomerHistoryOut,
+     CustomerOut,
+     CustomerStats,
+     CustomerWithBalance,
++    ExtraPaymentIn,
++    ExtraPaymentOut,
+     FavoriteOut,
+     MonthAgg,
+     PinChangeIn,
++    ResetPaymentIn,
+     WeekdayAgg,
+ )
+ from security import get_current_user, get_optional_user
+@@ -312,7 +315,38 @@ def customer_lookup(
+     )
+ 
+ 
+-def settle_pending(db: Session, customer: Customer, actor: str, action: str) -> dict:
++def add_extra_payment(
++    db: Session, customer: Customer, actor: str, amount: float, note: str = ""
++) -> ExtraPayment:
++    """Book what a customer paid on top of their debt (no commit; the caller commits).
++
++    It is income of the store, not credit on the customer: their balance, totals and
++    statement stay what they were.
++    """
++    extra = ExtraPayment(
++        customer_id=customer.id,
++        username=customer.username,
++        amount=round(amount, 2),
++        note=note.strip(),
++        created_by=actor,
++    )
++    db.add(extra)
++    db.flush()
++    audit.record(
++        db, actor, "customer.extra_payment", "customer", customer.username,
++        f"extra payment of {extra.amount:.2f}" + (f": {extra.note}" if extra.note else ""),
++    )
++    return extra
++
++
++def settle_pending(
++    db: Session,
++    customer: Customer,
++    actor: str,
++    action: str,
++    extra_amount: float = 0.0,
++    extra_note: str = "",
++) -> dict:
+     orders = (
+         db.query(Order)
+         .filter(Order.customer_id == customer.id, Order.status == "pending")
+@@ -339,11 +373,15 @@ def settle_pending(db: Session, customer: Customer, actor: str, action: str) ->
+             + ", ".join(f"#{o.id}" for o in orders)
+             + f"; amount {amount}",
+         )
++    extra = round(extra_amount or 0.0, 2)
++    if extra > 0:
++        add_extra_payment(db, customer, actor, extra, extra_note)
+     db.commit()
+     return {
+         "username": customer.username,
+         "settled": len(orders),
+         "amount": amount,
++        "extra": extra if extra > 0 else 0.0,
+     }
+ 
+ 
+@@ -409,9 +447,30 @@ def reset_pin(
+ @router.post("/{username}/reset-payment")
+ def reset_payment(
+     username: str,
++    data: Optional[ResetPaymentIn] = Body(default=None),
+     db: Session = Depends(get_db),
+     user: User = Depends(get_current_user),
+ ):
++    """Mark all pending orders paid. `extra_amount` is what the customer paid on top of
++    the debt; it is booked as an extra payment (store income that covers shrinkage)."""
++    data = data or ResetPaymentIn()
+     return settle_pending(
+-        db, find_customer(db, username), user.username, "customer.reset_payment"
++        db, find_customer(db, username), user.username, "customer.reset_payment",
++        extra_amount=data.extra_amount or 0.0, extra_note=data.note,
+     )
++
++
++@router.post("/{username}/extra-payment", response_model=ExtraPaymentOut, status_code=201)
++def record_extra_payment(
++    username: str,
++    data: ExtraPaymentIn,
++    db: Session = Depends(get_db),
++    user: User = Depends(get_current_user),
++):
++    """A customer paid more than they owed (or paid in advance): book the surplus."""
++    extra = add_extra_payment(
++        db, find_customer(db, username), user.username, data.amount, data.note
++    )
++    db.commit()
++    db.refresh(extra)
++    return extra
+diff --git a/backend/routers/extra_payments.py b/backend/routers/extra_payments.py
+new file mode 100644
+index 0000000..ba194ac
+--- /dev/null
++++ b/backend/routers/extra_payments.py
+@@ -0,0 +1,45 @@
++from typing import List
++
++from fastapi import APIRouter, Depends, HTTPException, Query
++from sqlalchemy.orm import Session
++
++import audit
++from database import get_db
++from models import ExtraPayment, User
++from schemas import ExtraPaymentOut
++from security import get_current_user
++
++router = APIRouter(prefix="/api/extra-payments", tags=["extra-payments"])
++
++
++@router.get("", response_model=List[ExtraPaymentOut])
++def list_extra_payments(
++    limit: int = Query(default=200, ge=1, le=1000),
++    db: Session = Depends(get_db),
++    _: User = Depends(get_current_user),
++):
++    """What customers paid on top of their debt, newest first."""
++    return (
++        db.query(ExtraPayment)
++        .order_by(ExtraPayment.created_at.desc(), ExtraPayment.id.desc())
++        .limit(limit)
++        .all()
++    )
++
++
++@router.delete("/{extra_id}", status_code=204)
++def delete_extra_payment(
++    extra_id: int,
++    db: Session = Depends(get_db),
++    user: User = Depends(get_current_user),
++):
++    """Remove an entry made by mistake."""
++    extra = db.get(ExtraPayment, extra_id)
++    if not extra:
++        raise HTTPException(status_code=404, detail="Extra payment not found")
++    audit.record(
++        db, user.username, "customer.extra_payment_delete", "customer", extra.username,
++        f"extra payment #{extra.id} of {extra.amount:.2f} removed",
++    )
++    db.delete(extra)
++    db.commit()
+diff --git a/backend/routers/purchases.py b/backend/routers/purchases.py
+new file mode 100644
+index 0000000..a25134e
+--- /dev/null
++++ b/backend/routers/purchases.py
+@@ -0,0 +1,117 @@
++from datetime import timedelta
++from typing import List
++
++from fastapi import APIRouter, Depends, HTTPException, Query
++from sqlalchemy.orm import Session
++
++import audit
++from database import get_db
++from models import Purchase, User
++from schemas import PurchaseIn, PurchaseOut, PurchaseUpdate
++from security import get_current_user
++from timeutil import utcnow
++
++router = APIRouter(prefix="/api/purchases", tags=["purchases"])
++
++
++def _check_date(day) -> None:
++    # A batch can be entered long after it was bought, never before it exists.
++    # One day of slack covers a clock that is ahead of UTC.
++    if day is not None and day > (utcnow() + timedelta(days=1)).date():
++        raise HTTPException(status_code=422, detail="The purchase date cannot be in the future")
++
++
++def _describe(p: Purchase) -> str:
++    who = f" from {p.supplier}" if p.supplier else ""
++    return f"{p.amount:.2f} on {p.purchased_on.isoformat()}{who}"
++
++
++@router.get("", response_model=List[PurchaseOut])
++def list_purchases(
++    limit: int = Query(default=200, ge=1, le=1000),
++    db: Session = Depends(get_db),
++    _: User = Depends(get_current_user),
++):
++    """Newest purchase date first."""
++    return (
++        db.query(Purchase)
++        .order_by(Purchase.purchased_on.desc(), Purchase.id.desc())
++        .limit(limit)
++        .all()
++    )
++
++
++@router.post("", response_model=PurchaseOut, status_code=201)
++def create_purchase(
++    data: PurchaseIn,
++    db: Session = Depends(get_db),
++    user: User = Depends(get_current_user),
++):
++    _check_date(data.purchased_on)
++    purchase = Purchase(
++        purchased_on=data.purchased_on or utcnow().date(),
++        amount=round(data.amount, 2),
++        supplier=data.supplier.strip(),
++        note=data.note.strip(),
++        created_by=user.username,
++    )
++    db.add(purchase)
++    db.flush()
++    audit.record(db, user.username, "purchase.create", "purchase", purchase.id, _describe(purchase))
++    db.commit()
++    db.refresh(purchase)
++    return purchase
++
++
++@router.put("/{purchase_id}", response_model=PurchaseOut)
++def update_purchase(
++    purchase_id: int,
++    data: PurchaseUpdate,
++    db: Session = Depends(get_db),
++    user: User = Depends(get_current_user),
++):
++    purchase = db.get(Purchase, purchase_id)
++    if not purchase:
++        raise HTTPException(status_code=404, detail="Purchase not found")
++    values = data.model_dump(exclude_unset=True)
++    _check_date(values.get("purchased_on"))
++    before = {
++        "amount": purchase.amount,
++        "date": purchase.purchased_on,
++        "supplier": purchase.supplier,
++        "note": purchase.note,
++    }
++    if values.get("amount") is not None:
++        purchase.amount = round(values["amount"], 2)
++    if values.get("purchased_on") is not None:
++        purchase.purchased_on = values["purchased_on"]
++    if values.get("supplier") is not None:
++        purchase.supplier = values["supplier"].strip()
++    if values.get("note") is not None:
++        purchase.note = values["note"].strip()
++    after = {
++        "amount": purchase.amount,
++        "date": purchase.purchased_on,
++        "supplier": purchase.supplier,
++        "note": purchase.note,
++    }
++    changes = audit.describe_changes(before, after)
++    if changes:
++        audit.record(db, user.username, "purchase.update", "purchase", purchase.id, changes)
++    db.commit()
++    db.refresh(purchase)
++    return purchase
++
++
++@router.delete("/{purchase_id}", status_code=204)
++def delete_purchase(
++    purchase_id: int,
++    db: Session = Depends(get_db),
++    user: User = Depends(get_current_user),
++):
++    purchase = db.get(Purchase, purchase_id)
++    if not purchase:
++        raise HTTPException(status_code=404, detail="Purchase not found")
++    audit.record(db, user.username, "purchase.delete", "purchase", purchase.id, _describe(purchase))
++    db.delete(purchase)
++    db.commit()
+diff --git a/backend/routers/reports.py b/backend/routers/reports.py
+index a5c517e..9f0cd1b 100644
+--- a/backend/routers/reports.py
++++ b/backend/routers/reports.py
+@@ -12,7 +12,7 @@ from starlette.responses import Response
+ 
+ from database import get_db
+ from due_dates import get_due_date
+-from models import Customer, Order, OrderItem, Product, StockAdjustment
++from models import Customer, ExtraPayment, Order, OrderItem, Product, Purchase, StockAdjustment
+ from security import get_current_user
+ from timeutil import utcnow
+ 
+@@ -67,6 +67,66 @@ def outstanding_total(db: Session) -> float:
+     return round(total or 0.0, 2)
+ 
+ 
++def balance_status(amount: float) -> str:
++    """"plus", "minus" or "even" (to the cent) for a store balance."""
++    cents = round(amount, 2)
++    if cents == 0:
++        return "even"
++    return "plus" if cents > 0 else "minus"
++
++
++def shrinkage_value_lost(db: Session) -> float:
++    """Value (at the purchase price recorded with each count) of everything counts found missing."""
++    total = 0.0
++    for adj in db.query(StockAdjustment).filter(StockAdjustment.difference < 0).all():
++        total += -adj.difference * (adj.unit_cost or 0)
++    return round(total, 2)
++
++
++def store_balance(db: Session) -> dict:
++    """What the store has taken in and spent, whatever the sales report basis.
++
++    Always computed from the rows (never kept as a running total), so it stays right when
++    an order goes paid -> pending, is cancelled, or a purchase is edited later:
++
++        balance = paid orders + extra payments - purchases
++
++    Orders still on credit are not in the balance yet; `projected_balance` adds them, which is
++    where the store ends up when everybody has paid. Missing goods are NOT subtracted: they
++    were bought and never sold, so they already show as a lower balance. Extra payments
++    are the money that covers that loss, so the shrinkage figures are information next to it.
++    """
++    paid = db.query(func.coalesce(func.sum(Order.total), 0.0)).filter(Order.status == "paid").scalar()
++    extra = db.query(func.coalesce(func.sum(ExtraPayment.amount), 0.0)).scalar()
++    spent = db.query(func.coalesce(func.sum(Purchase.amount), 0.0)).scalar()
++    pending_orders = db.query(Order).filter(Order.status == "pending").count()
++    outstanding = outstanding_total(db)
++    paid, extra, spent = round(paid or 0.0, 2), round(extra or 0.0, 2), round(spent or 0.0, 2)
++    balance = round(paid + extra - spent, 2)
++    projected = round(balance + outstanding, 2)
++    shrinkage = shrinkage_value_lost(db)
++    return {
++        "purchases_total": spent,
++        "purchases_count": db.query(Purchase).count(),
++        "paid_total": paid,
++        "extra_total": extra,
++        "extra_count": db.query(ExtraPayment).count(),
++        "income_total": round(paid + extra, 2),
++        "balance": balance,
++        "status": balance_status(balance),
++        "outstanding": outstanding,
++        "pending_orders": pending_orders,
++        # True when nobody owes anything: then `status` is the final result.
++        "settled": pending_orders == 0,
++        "projected_balance": projected,
++        "projected_status": balance_status(projected),
++        "shrinkage_value": shrinkage,
++        "shrinkage_covered": round(min(extra, shrinkage), 2),
++        "shrinkage_uncovered": round(max(0.0, shrinkage - extra), 2),
++        "extra_surplus": round(max(0.0, extra - shrinkage), 2),
++    }
++
++
+ def low_stock_products(db: Session) -> list[dict]:
+     """Active products at or below their own restock threshold, emptiest first."""
+     products = (
+@@ -346,9 +406,19 @@ def summary(
+         "next_due_date": get_due_date(db),
+         "low_stock_products": low_stock_products(db),
+         "margin_month": margins_for_period(db, month, next_month, basis)["totals"],
++        "store_balance": store_balance(db),
+     }
+ 
+ 
++@router.get("/balance")
++def balance(
++    _: dict = Depends(get_current_user),
++    db: Session = Depends(get_db),
++):
++    """Store balance: paid orders + extra payments - purchases (see store_balance)."""
++    return store_balance(db)
++
++
+ @router.get("/margins")
+ def margins(
+     period: Literal["today", "week", "month", "all"] = "all",
+@@ -524,6 +594,24 @@ def export_csv(
+         record="store",
+         details=get_due_date(db) or "not configured",
+     )
++    bal = store_balance(db)
++    write_row("store_balance", record="purchases", count=bal["purchases_count"],
++              amount=bal["purchases_total"], details="money spent on goods")
++    write_row("store_balance", record="paid_orders", amount=bal["paid_total"],
++              details="orders marked paid")
++    write_row("store_balance", record="extra_payments", count=bal["extra_count"],
++              amount=bal["extra_total"], details="paid on top of debts; covers shrinkage")
++    write_row("store_balance", record="balance", amount=bal["balance"], details=bal["status"])
++    write_row("store_balance", record="outstanding", count=bal["pending_orders"],
++              amount=bal["outstanding"], details="credit not yet paid")
++    write_row("store_balance", record="projected_balance", amount=bal["projected_balance"],
++              details=f"if everybody pays: {bal['projected_status']}")
++    write_row("store_balance", record="shrinkage_value", amount=bal["shrinkage_value"],
++              details=f"covered by extra payments: {bal['shrinkage_covered']}")
++    for purchase in db.query(Purchase).order_by(Purchase.purchased_on, Purchase.id).all():
++        write_row("purchases", period=purchase.purchased_on.isoformat(), record="purchase",
++                  record_id=purchase.id, name=purchase.supplier, amount=purchase.amount,
++                  details=purchase.note)
+     paid_by_customer = {
+         row.customer_id: (
+             row.order_count,
+diff --git a/backend/routers/settings.py b/backend/routers/settings.py
+index 9e010cd..fb2515e 100644
+--- a/backend/routers/settings.py
++++ b/backend/routers/settings.py
+@@ -1,9 +1,15 @@
+-from fastapi import APIRouter, Depends
++import json
++import os
++import uuid
++
++from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+ from sqlalchemy.orm import Session
+ 
+ import audit
++import payment_info
+ from database import get_db
+ from models import Setting, User
++from routers.products import ALLOWED_IMAGE_TYPES, MAX_IMAGE_BYTES, _detect_image_type, images_dir
+ from schemas import SettingIn
+ from security import get_current_user
+ 
+@@ -19,6 +25,35 @@ def list_settings(db: Session = Depends(get_db)):
+     return get_all_settings(db)
+ 
+ 
++@router.post("/payment-qr")
++def upload_payment_qr(
++    file: UploadFile = File(...),
++    db: Session = Depends(get_db),
++    user: User = Depends(get_current_user),
++):
++    """Upload the QR code image of a payment method (e.g. a Swish or bank QR).
++
++    The file is only referenced once the admin saves `payment_methods` with its name.
++    """
++    ext = ALLOWED_IMAGE_TYPES.get(file.content_type or "")
++    if not ext:
++        raise HTTPException(status_code=400, detail="Only PNG, JPEG, WebP and GIF images are allowed")
++    data = file.file.read(MAX_IMAGE_BYTES + 1)
++    if not data:
++        raise HTTPException(status_code=400, detail="Empty file")
++    if len(data) > MAX_IMAGE_BYTES:
++        raise HTTPException(status_code=413, detail="Image too large (max 5 MB)")
++    actual_type = _detect_image_type(data)
++    if actual_type is None or ALLOWED_IMAGE_TYPES.get(actual_type) != ext:
++        raise HTTPException(status_code=400, detail="File content does not match the declared image type")
++    name = f"pay-{uuid.uuid4().hex}{ext}"
++    with open(os.path.join(images_dir(), name), "wb") as f:
++        f.write(data)
++    audit.record(db, user.username, "settings.payment_qr_upload", "setting", payment_info.METHODS_SETTING, name)
++    db.commit()
++    return {"image": name, "url": f"/api/images/{name}"}
++
++
+ @router.put("/{key}")
+ def upsert_setting(
+     key: str,
+@@ -26,17 +61,37 @@ def upsert_setting(
+     db: Session = Depends(get_db),
+     user: User = Depends(get_current_user),
+ ):
++    value = data.value
++    # The kiosk shows these to every customer, so they are checked and stored canonically.
++    if key == payment_info.METHODS_SETTING:
++        try:
++            value = payment_info.normalize_methods(value, images_dir())
++        except payment_info.PaymentInfoError as exc:
++            raise HTTPException(status_code=422, detail=str(exc)) from exc
++    elif key == payment_info.INSTRUCTIONS_SETTING:
++        try:
++            value = payment_info.normalize_instructions(value)
++        except payment_info.PaymentInfoError as exc:
++            raise HTTPException(status_code=422, detail=str(exc)) from exc
+     setting = db.get(Setting, key)
+     previous = setting.value if setting else None
+     if setting:
+-        setting.value = data.value
++        setting.value = value
+     else:
+-        setting = Setting(key=key, value=data.value)
++        setting = Setting(key=key, value=value)
+         db.add(setting)
+-    if previous != data.value:
+-        audit.record(
+-            db, user.username, "settings.update", "setting", key,
+-            audit.describe_changes({key: previous}, {key: data.value}),
+-        )
++    if previous != value:
++        if key == payment_info.METHODS_SETTING:
++            methods = json.loads(value)
++            details = f"{len(methods)} payment method(s), {sum(m['enabled'] for m in methods)} shown"
++        else:
++            details = audit.describe_changes({key: previous}, {key: value})
++        audit.record(db, user.username, "settings.update", "setting", key, details)
+     db.commit()
++    if key == payment_info.METHODS_SETTING:
++        # Remove QR images that are no longer used by any method.
++        for name in payment_info.qr_images(previous) - payment_info.qr_images(value):
++            path = os.path.join(images_dir(), name)
++            if os.path.isfile(path):
++                os.remove(path)
+     return {"key": key, "value": setting.value}
+diff --git a/backend/schemas.py b/backend/schemas.py
+index 30b3c2b..f2570f8 100644
+--- a/backend/schemas.py
++++ b/backend/schemas.py
+@@ -355,6 +355,59 @@ class SettingIn(BaseModel):
+     value: str
+ 
+ 
++MAX_MONEY_AMOUNT = 10_000_000
++
++
++class PurchaseIn(BaseModel):
++    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
++    # Any past date: a batch bought earlier can be entered afterwards. Default today (UTC).
++    purchased_on: Optional[date] = None
++    supplier: str = Field(default="", max_length=100)
++    note: str = Field(default="", max_length=200)
++
++
++class PurchaseUpdate(BaseModel):
++    amount: Optional[float] = Field(default=None, gt=0, le=MAX_MONEY_AMOUNT)
++    purchased_on: Optional[date] = None
++    supplier: Optional[str] = Field(default=None, max_length=100)
++    note: Optional[str] = Field(default=None, max_length=200)
++
++
++class PurchaseOut(BaseModel):
++    id: int
++    purchased_on: date
++    amount: float
++    supplier: str = ""
++    note: str = ""
++    created_by: str = ""
++    created_at: Optional[datetime] = None
++
++    model_config = ConfigDict(from_attributes=True)
++
++
++class ExtraPaymentIn(BaseModel):
++    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
++    note: str = Field(default="", max_length=200)
++
++
++class ExtraPaymentOut(BaseModel):
++    id: int
++    username: str
++    amount: float
++    note: str = ""
++    created_by: str = ""
++    created_at: Optional[datetime] = None
++
++    model_config = ConfigDict(from_attributes=True)
++
++
++class ResetPaymentIn(BaseModel):
++    """Optional body of reset-payment: what the customer paid on top of the debt."""
++
++    extra_amount: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY_AMOUNT)
++    note: str = Field(default="", max_length=200)
++
++
+ class UserOut(BaseModel):
+     id: int
+     username: str
+diff --git a/backend/seed.py b/backend/seed.py
+index 565d6e8..eefd195 100644
+--- a/backend/seed.py
++++ b/backend/seed.py
+@@ -49,6 +49,8 @@ def seed(db: Session):
+         "payment_due_date": "",
+         "kiosk_idle_seconds": "90",
+         "kiosk_barcode_scanning": "false",
++        "payment_methods": "[]",
++        "pay_instructions": "",
+         "backup_interval_hours": "24",
+         "backup_keep": "7",
+     }.items():
+diff --git a/backend/tests/test_api.py b/backend/tests/test_api.py
+index b538085..15af89c 100644
+--- a/backend/tests/test_api.py
++++ b/backend/tests/test_api.py
+@@ -2132,3 +2132,314 @@ def test_sales_basis_counts_unpaid_credit_orders(client, admin_headers):
+     assert summary_rows and all("incl. unpaid" in x["details"] for x in summary_rows)
+     assert client.get("/api/reports/summary?basis=cash", headers=admin_headers).status_code == 422
+ 
++
++
++# --------------------------------------------------------------------------- #
++# Purchases, extra payments, the store balance and the payment info (1.6.0)
++# --------------------------------------------------------------------------- #
++def _balance(client, headers):
++    r = client.get("/api/reports/balance", headers=headers)
++    assert r.status_code == 200, r.text
++    return r.json()
++
++
++def test_purchases_are_entered_edited_and_deleted(client, admin_headers):
++    from timeutil import utcnow
++
++    today = utcnow().date()
++    before = _balance(client, admin_headers)["purchases_total"]
++
++    r = client.post("/api/purchases", json={"amount": 120.5, "supplier": "Wholesaler", "note": "chips"}, headers=admin_headers)
++    assert r.status_code == 201, r.text
++    first = r.json()
++    assert first["purchased_on"] == today.isoformat() and first["created_by"] == "admin"
++
++    # A batch bought earlier is entered afterwards with its real date.
++    old_day = (today - timedelta(days=40)).isoformat()
++    old = client.post("/api/purchases", json={"amount": 80, "purchased_on": old_day}, headers=admin_headers).json()
++    assert old["purchased_on"] == old_day
++    assert _balance(client, admin_headers)["purchases_total"] == pytest.approx(before + 200.5)
++    listed = [p["id"] for p in client.get("/api/purchases", headers=admin_headers).json()]
++    assert listed.index(first["id"]) < listed.index(old["id"]), "newest purchase date first"
++
++    # The value of an earlier batch can be corrected later.
++    r = client.put(f"/api/purchases/{old['id']}", json={"amount": 95.25, "note": "invoice found"}, headers=admin_headers)
++    assert r.status_code == 200 and r.json()["amount"] == 95.25 and r.json()["note"] == "invoice found"
++    assert _balance(client, admin_headers)["purchases_total"] == pytest.approx(before + 215.75)
++
++    assert client.delete(f"/api/purchases/{first['id']}", headers=admin_headers).status_code == 204
++    assert client.delete(f"/api/purchases/{old['id']}", headers=admin_headers).status_code == 204
++    assert client.delete(f"/api/purchases/{old['id']}", headers=admin_headers).status_code == 404
++    assert _balance(client, admin_headers)["purchases_total"] == pytest.approx(before)
++
++    actions = {e["action"] for e in client.get("/api/audit?action=purchase.", headers=admin_headers).json()}
++    assert {"purchase.create", "purchase.update", "purchase.delete"} <= actions
++
++
++def test_purchase_validation(client, admin_headers):
++    from timeutil import utcnow
++
++    for bad in ({"amount": 0}, {"amount": -5}, {"amount": 1e12}, {"amount": "abc"}, {}):
++        assert client.post("/api/purchases", json=bad, headers=admin_headers).status_code == 422, bad
++    future = (utcnow().date() + timedelta(days=5)).isoformat()
++    assert client.post("/api/purchases", json={"amount": 5, "purchased_on": future}, headers=admin_headers).status_code == 422
++    assert client.put("/api/purchases/999999", json={"amount": 5}, headers=admin_headers).status_code == 404
++    p = client.post("/api/purchases", json={"amount": 5}, headers=admin_headers).json()
++    assert client.put(f"/api/purchases/{p['id']}", json={"purchased_on": future}, headers=admin_headers).status_code == 422
++    assert client.put(f"/api/purchases/{p['id']}", json={"amount": 0}, headers=admin_headers).status_code == 422
++    client.delete(f"/api/purchases/{p['id']}", headers=admin_headers)
++    assert client.get("/api/purchases").status_code == 401
++    assert client.post("/api/purchases", json={"amount": 5}).status_code == 401
++
++
++def test_balance_status_rounds_to_the_cent():
++    from routers.reports import balance_status
++
++    assert [balance_status(x) for x in (0, 0.004, -0.004, 0.01, -0.01, 120.0, -3.5)] == [
++        "even", "even", "even", "plus", "minus", "plus", "minus",
++    ]
++
++
++def test_store_balance_is_paid_plus_extra_minus_purchases(client, admin_headers):
++    start = _balance(client, admin_headers)
++    product = _new_product(client, admin_headers, price=10.0, stock=30, cost_price=4.0)
++    buyer = f"balance_{uuid.uuid4().hex[:6]}"
++    order = _buy(client, buyer, product["id"], 3)  # 30.00 on credit
++    after_sale = _balance(client, admin_headers)
++
++    # Credit is not income until it is paid, but it shows as outstanding / projected.
++    assert after_sale["balance"] == pytest.approx(start["balance"])
++    assert after_sale["outstanding"] == pytest.approx(start["outstanding"] + 30)
++    assert after_sale["projected_balance"] == pytest.approx(start["projected_balance"] + 30)
++    assert after_sale["pending_orders"] == start["pending_orders"] + 1
++    assert after_sale["settled"] is False
++
++    purchase = client.post("/api/purchases", json={"amount": 100}, headers=admin_headers).json()
++    after_purchase = _balance(client, admin_headers)
++    assert after_purchase["balance"] == pytest.approx(start["balance"] - 100)
++    assert after_purchase["projected_balance"] == pytest.approx(start["projected_balance"] + 30 - 100)
++
++    # Marked paid -> it lands in the balance; the surplus is extra income.
++    r = client.post(
++        f"/api/customers/{buyer}/reset-payment",
++        json={"extra_amount": 7.5, "note": "keep the change"},
++        headers=admin_headers,
++    )
++    assert r.status_code == 200, r.text
++    assert (r.json()["settled"], r.json()["amount"], r.json()["extra"]) == (1, 30.0, 7.5)
++    paid = _balance(client, admin_headers)
++    assert paid["paid_total"] == pytest.approx(start["paid_total"] + 30)
++    assert paid["extra_total"] == pytest.approx(start["extra_total"] + 7.5)
++    assert paid["balance"] == pytest.approx(start["balance"] - 100 + 30 + 7.5)
++    assert paid["outstanding"] == pytest.approx(start["outstanding"])
++    assert paid["income_total"] == pytest.approx(paid["paid_total"] + paid["extra_total"])
++    assert paid["projected_balance"] == pytest.approx(paid["balance"] + paid["outstanding"])
++    assert paid["status"] in {"plus", "minus", "even"}
++
++    # The extra payment is store income, never credit on the customer.
++    lookup = client.get(f"/api/customers/{buyer}").json()
++    assert lookup["balance"] == pytest.approx(0)
++    assert lookup["total_paid"] == pytest.approx(30)
++    assert lookup["stats"]["total_paid"] == pytest.approx(30)
++
++    # Derived, not stored: paid -> pending takes it out of the balance again.
++    client.patch(f"/api/orders/{order['id']}/status?new_status=pending", headers=admin_headers)
++    back = _balance(client, admin_headers)
++    assert back["paid_total"] == pytest.approx(start["paid_total"])
++    assert back["balance"] == pytest.approx(start["balance"] - 100 + 7.5)
++    # A cancelled order is no income and no debt.
++    client.patch(f"/api/orders/{order['id']}/status?new_status=cancelled", headers=admin_headers)
++    cancelled = _balance(client, admin_headers)
++    assert cancelled["outstanding"] == pytest.approx(start["outstanding"])
++    assert cancelled["balance"] == pytest.approx(start["balance"] - 100 + 7.5)
++
++    # An earlier purchase can still be corrected: the balance follows.
++    client.put(f"/api/purchases/{purchase['id']}", json={"amount": 60}, headers=admin_headers)
++    assert _balance(client, admin_headers)["balance"] == pytest.approx(start["balance"] - 60 + 7.5)
++    client.delete(f"/api/purchases/{purchase['id']}", headers=admin_headers)
++
++
++def test_balance_reads_plus_minus_or_even_once_everything_is_paid(client, admin_headers):
++    """With nothing outstanding, `status` is the final result of the store."""
++    # Everybody pays: nothing is on credit any more.
++    for c in client.get("/api/customers", headers=admin_headers).json():
++        if c["balance"] > 0:
++            client.post(f"/api/customers/{c['username']}/reset-payment", headers=admin_headers)
++    settled = _balance(client, admin_headers)
++    assert settled["settled"] is True and settled["pending_orders"] == 0 and settled["outstanding"] == 0
++    assert settled["projected_balance"] == pytest.approx(settled["balance"])
++    assert settled["projected_status"] == settled["status"]
++
++    # Make sure there is money to spend, then spend exactly that: even.
++    name = f"even_{uuid.uuid4().hex[:6]}"
++    _buy(client, name, _new_product(client, admin_headers, price=1.0, stock=2)["id"], 1)
++    extra = round(max(0.0, -settled["balance"]) + 100, 2)
++    r = client.post(f"/api/customers/{name}/extra-payment", json={"amount": extra, "note": "top-up"}, headers=admin_headers)
++    assert r.status_code == 201, r.text
++    client.post(f"/api/customers/{name}/reset-payment", headers=admin_headers)
++    money = _balance(client, admin_headers)["balance"]
++    assert money > 0
++
++    purchase = client.post("/api/purchases", json={"amount": money}, headers=admin_headers).json()
++    even = _balance(client, admin_headers)
++    assert (even["status"], even["balance"], even["settled"]) == ("even", 0, True)
++
++    client.put(f"/api/purchases/{purchase['id']}", json={"amount": round(money + 5, 2)}, headers=admin_headers)
++    minus = _balance(client, admin_headers)
++    assert (minus["status"], minus["balance"]) == ("minus", -5)
++    client.put(f"/api/purchases/{purchase['id']}", json={"amount": round(money - 5, 2)}, headers=admin_headers)
++    plus = _balance(client, admin_headers)
++    assert (plus["status"], plus["balance"]) == ("plus", 5)
++    client.delete(f"/api/purchases/{purchase['id']}", headers=admin_headers)
++
++
++def test_extra_payments_are_listed_validated_and_removable(client, admin_headers):
++    name = f"extra_{uuid.uuid4().hex[:6]}"
++    order = _buy(client, name, _new_product(client, admin_headers, price=3.0, stock=5)["id"], 1)
++    assert client.post(f"/api/customers/{name}/extra-payment", json={"amount": 0}, headers=admin_headers).status_code == 422
++    assert client.post(f"/api/customers/{name}/extra-payment", json={"amount": -2}, headers=admin_headers).status_code == 422
++    assert client.post("/api/customers/nobody_here_x/extra-payment", json={"amount": 2}, headers=admin_headers).status_code == 404
++    assert client.post(f"/api/customers/{name}/extra-payment", json={"amount": 2}).status_code == 401
++    assert client.post(f"/api/customers/{name}/reset-payment", json={"extra_amount": -1}, headers=admin_headers).status_code == 422
++
++    # reset-payment without a body (existing clients) and without an extra amount book no extra.
++    r = client.post(f"/api/customers/{name}/reset-payment", headers=admin_headers)
++    assert (r.json()["settled"], r.json()["extra"]) == (1, 0.0)
++    assert order["total"] == 3.0
++    extra_before = _balance(client, admin_headers)["extra_total"]
++
++    # Paying more than owed with nothing owed is fine: it is booked as income all the same.
++    r = client.post(f"/api/customers/{name}/extra-payment", json={"amount": 4.25, "note": "tip jar"}, headers=admin_headers)
++    assert r.status_code == 201 and r.json()["username"] == name and r.json()["amount"] == 4.25
++    entry = r.json()
++    assert _balance(client, admin_headers)["extra_total"] == pytest.approx(extra_before + 4.25)
++    listed = client.get("/api/extra-payments", headers=admin_headers).json()
++    assert listed[0]["id"] == entry["id"] and listed[0]["note"] == "tip jar" and listed[0]["created_by"] == "admin"
++    assert client.get("/api/extra-payments").status_code == 401
++
++    # The customer's own figures never change.
++    assert client.get(f"/api/customers/{name}").json()["balance"] == 0
++
++    assert client.delete(f"/api/extra-payments/{entry['id']}", headers=admin_headers).status_code == 204
++    assert client.delete(f"/api/extra-payments/{entry['id']}", headers=admin_headers).status_code == 404
++    assert _balance(client, admin_headers)["extra_total"] == pytest.approx(extra_before)
++    actions = {e["action"] for e in client.get("/api/audit?action=customer.extra", headers=admin_headers).json()}
++    assert {"customer.extra_payment", "customer.extra_payment_delete"} <= actions
++
++
++def test_extra_payments_cover_shrinkage(client, admin_headers):
++    """Missing goods are already a lower balance; the extra income is shown against that loss."""
++    start = _balance(client, admin_headers)
++    pid = _new_product(client, admin_headers, stock=20, cost_price=3.0)["id"]
++    _count(client, admin_headers, {"product_id": pid, "counted": 16, "expected_stock": 20})  # 4 missing = 12.00
++    lost = _balance(client, admin_headers)
++    assert lost["shrinkage_value"] == pytest.approx(start["shrinkage_value"] + 12.0)
++    # Shrinkage is not subtracted from the balance a second time.
++    assert lost["balance"] == pytest.approx(start["balance"])
++    assert lost["shrinkage_covered"] == pytest.approx(min(lost["extra_total"], lost["shrinkage_value"]))
++    assert lost["shrinkage_covered"] + lost["shrinkage_uncovered"] == pytest.approx(lost["shrinkage_value"])
++    assert lost["extra_surplus"] == pytest.approx(max(0.0, lost["extra_total"] - lost["shrinkage_value"]))
++
++
++def test_balance_in_summary_and_csv_export(client, admin_headers):
++    summary = client.get("/api/reports/summary", headers=admin_headers).json()
++    assert summary["store_balance"] == _balance(client, admin_headers)
++    purchase = client.post("/api/purchases", json={"amount": 12.5, "supplier": "=SUM(A1)"}, headers=admin_headers).json()
++    rows = list(csv.DictReader(io.StringIO(
++        client.get("/api/reports/export.csv", headers=admin_headers).text.lstrip("﻿"))))
++    records = {r["record"]: r for r in rows if r["section"] == "store_balance"}
++    assert {"purchases", "paid_orders", "extra_payments", "balance", "outstanding", "projected_balance", "shrinkage_value"} <= set(records)
++    exported = next(r for r in rows if r["section"] == "purchases" and r["id"] == str(purchase["id"]))
++    assert exported["amount"] == "12.5" and exported["name"] == "'=SUM(A1)", "formulas are neutralised"
++    client.delete(f"/api/purchases/{purchase['id']}", headers=admin_headers)
++
++
++def _methods(*items):
++    import json
++
++    return json.dumps(list(items))
++
++
++def test_payment_methods_are_validated_and_stored_canonically(client, admin_headers):
++    import json
++
++    ok = _methods(
++        {"type": "bank", "label": "Bank transfer", "value": "SE12 3456 7890", "note": "Message: your username"},
++        {"type": "phone", "label": "Swish", "value": "070-123 45 67"},
++        {"type": "link", "label": "Pay online", "value": "https://pay.example.com/kiosk", "enabled": False},
++        {"type": "text", "label": "Cash", "value": "Put it in the tin\nat the counter"},
++    )
++    r = client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": ok}, headers=admin_headers)
++    assert r.status_code == 200, r.text
++    stored = json.loads(client.get("/api/settings").json()["payment_methods"])
++    assert [m["type"] for m in stored] == ["bank", "phone", "link", "text"]
++    assert [m["enabled"] for m in stored] == [True, True, False, True]
++    assert set(stored[0]) == {"type", "label", "value", "note", "image", "enabled"}
++
++    bad = [
++        "not json", '{"type": "bank"}', _methods("string"), _methods({"type": "crypto", "value": "x"}),
++        _methods({"type": "bank", "label": "B"}),  # no value
++        _methods({"type": "link", "label": "L", "value": "javascript:alert(1)"}),
++        _methods({"type": "link", "label": "L", "value": "ftp://x.example"}),
++        _methods({"type": "bank", "value": "x" * 301}),
++        _methods({"type": "bank", "value": "ok", "enabled": "yes"}),
++        _methods({"type": "bank", "value": "a\u0000b"}),
++        _methods({"type": "qr", "label": "QR"}),  # no image uploaded
++        _methods({"type": "qr", "image": "../../etc/passwd"}),
++        _methods({"type": "qr", "image": "pay-" + "0" * 32 + ".png"}),  # looks right, was never uploaded
++        _methods({"type": "qr", "image": "some-product-image.png"}),
++        json.dumps([{"type": "text", "value": "x"}] * 11),
++    ]
++    for value in bad:
++        r = client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": value}, headers=admin_headers)
++        assert r.status_code == 422, value[:60]
++    # A rejected save leaves the stored setting alone.
++    assert len(json.loads(client.get("/api/settings").json()["payment_methods"])) == 4
++
++    r = client.put("/api/settings/pay_instructions", json={"key": "pay_instructions", "value": "Pay within 14 days"}, headers=admin_headers)
++    assert r.status_code == 200 and client.get("/api/settings").json()["pay_instructions"] == "Pay within 14 days"
++    assert client.put("/api/settings/pay_instructions", json={"key": "pay_instructions", "value": "x" * 501}, headers=admin_headers).status_code == 422
++    assert client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": ok}).status_code == 401
++
++    audit = client.get("/api/audit?action=settings.update", headers=admin_headers).json()
++    assert any(e["entity_id"] == "payment_methods" and "4 payment method(s), 3 shown" in e["details"] for e in audit)
++    client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": "[]"}, headers=admin_headers)
++    client.put("/api/settings/pay_instructions", json={"key": "pay_instructions", "value": ""}, headers=admin_headers)
++
++
++def test_payment_qr_upload_is_served_and_cleaned_up(client, admin_headers):
++    import json
++    import re
++
++    png = _sample_png()
++    r = client.post("/api/settings/payment-qr", files={"file": ("qr.png", png, "image/png")}, headers=admin_headers)
++    assert r.status_code == 200, r.text
++    name = r.json()["image"]
++    assert re.fullmatch(r"pay-[0-9a-f]{32}\.png", name) and r.json()["url"] == f"/api/images/{name}"
++    assert client.get(r.json()["url"]).status_code == 200  # the kiosk can show it without logging in
++
++    methods = _methods({"type": "qr", "label": "Swish QR", "value": "070-123 45 67", "image": name})
++    assert client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": methods}, headers=admin_headers).status_code == 200
++    assert json.loads(client.get("/api/settings").json()["payment_methods"])[0]["image"] == name
++
++    # Replacing the QR code removes the old file; so does dropping the method.
++    second = client.post("/api/settings/payment-qr", files={"file": ("qr2.png", png, "image/png")}, headers=admin_headers).json()["image"]
++    assert second != name
++    methods2 = _methods({"type": "qr", "label": "Swish QR", "image": second})
++    client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": methods2}, headers=admin_headers)
++    assert client.get(f"/api/images/{name}").status_code == 404
++    assert client.get(f"/api/images/{second}").status_code == 200
++    client.put("/api/settings/payment_methods", json={"key": "payment_methods", "value": "[]"}, headers=admin_headers)
++    assert client.get(f"/api/images/{second}").status_code == 404
++
++    for bad_file in (
++        ("qr.png", b"", "image/png"),
++        ("qr.png", b"not an image at all", "image/png"),
++        ("qr.svg", b"<svg onload=alert(1)/>", "image/svg+xml"),
++        ("qr.png", png, "image/jpeg"),
++    ):
++        r = client.post("/api/settings/payment-qr", files={"file": bad_file}, headers=admin_headers)
++        assert r.status_code == 400, bad_file[0]
++    too_big = png + b"\0" * (5 * 1024 * 1024)
++    assert client.post("/api/settings/payment-qr", files={"file": ("big.png", too_big, "image/png")}, headers=admin_headers).status_code == 413
++    assert client.post("/api/settings/payment-qr", files={"file": ("qr.png", png, "image/png")}).status_code == 401
+diff --git a/tests/e2e/e2e.js b/tests/e2e/e2e.js
+index 966c44a..7c395be 100644
+--- a/tests/e2e/e2e.js
++++ b/tests/e2e/e2e.js
+@@ -181,6 +181,38 @@ server.listen(PORT, async () => {
+     if (!res.ok) throw new Error("failed to set customer self-service payment: " + res.status);
+   }
+ 
++  // Wait until the backend has stored a setting (poll from Node: a page.waitForFunction with an
++  // async predicate would not wait for the request, and navigating away cancels a running save).
++  async function waitForSettings(predicate, what, timeout = 7000) {
++    const deadline = Date.now() + timeout;
++    while (Date.now() < deadline) {
++      const settings = await (await fetch(`http://${BACKEND}/api/settings`)).json();
++      if (predicate(settings)) return settings;
++      await new Promise((resolve) => setTimeout(resolve, 150));
++    }
++    throw new Error("timed out waiting for " + what);
++  }
++
++  // A customer buys on credit (through the public API, like the kiosk does).
++  async function placeOrder(username, quantity = 1) {
++    const products = await (await fetch(`http://${BACKEND}/api/products`)).json();
++    const product = products.find((p) => p.name === "Bottled Water") || products.find((p) => p.stock >= quantity);
++    const res = await fetch(`http://${BACKEND}/api/orders`, {
++      method: "POST",
++      headers: { "Content-Type": "application/json" },
++      body: JSON.stringify({ customer_username: username, items: [{ product_id: product.id, quantity }] }),
++    });
++    if (!res.ok) throw new Error(`order for ${username} failed: ${res.status}`);
++    return res.json();
++  }
++
++  // "1 234,50 €" / "−5,00 €" / "+0,00 €" -> number (sv-SE formatting, U+2212 minus).
++  const money = (text) => {
++    const m = text.replace(/\u2212/g, "-").replace(/[\s\u00a0\u202f]/g, "").match(/-?\d+(?:[.,]\d+)?/);
++    if (!m) throw new Error("no amount in: " + text);
++    return parseFloat(m[0].replace(",", "."));
++  };
++
+   try {
+     // ---- CUSTOMER FLOW ----
+     await page.goto(`http://127.0.0.1:${PORT}`, { waitUntil: "networkidle" });
+@@ -526,6 +558,7 @@ server.listen(PORT, async () => {
+ 
+     await step("admin: reset payment clears balance", async () => {
+       await page.locator("#reset-from-modal").click();
++      await page.locator("#confirm-reset").click(); // the dialog also takes an optional extra amount
+       await page.waitForSelector(".toast.success", { timeout: 5000 });
+       await page.waitForTimeout(700);
+       const row = page.locator("tr", { hasText: "alice" });
+@@ -1072,6 +1105,180 @@ server.listen(PORT, async () => {
+         .some((tr) => tr.textContent.includes("pin_e2e") && tr.textContent.includes("🔒")));
+       return "reset blocked while unpaid, allowed after payment";
+     });
++
++    // ---- MONEY: purchases, extra payments, store balance ----
++    const moneyBalance = async () => money(await page.locator("#money-balance").textContent());
++    const waitMoneyBalance = async (expected) => {
++      const deadline = Date.now() + 7000;
++      let last = NaN;
++      while (Date.now() < deadline) {
++        last = await moneyBalance().catch(() => NaN);
++        if (Math.abs(last - expected) < 0.006) return last;
++        await page.waitForTimeout(150);
++      }
++      throw new Error(`store balance is ${last}, expected ${expected}`);
++    };
++
++    await step("admin: a purchase lowers the store balance, also when entered afterwards with an earlier date", async () => {
++      await adminView("money", "#money-balance");
++      const before = await moneyBalance();
++      const earlier = new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10);
++      await page.locator('[data-action="admin-add-purchase"]').click();
++      await page.fill("#pu-amount", "50");
++      await page.fill("#pu-date", earlier);
++      await page.fill("#pu-supplier", "E2E Wholesale");
++      await page.fill("#pu-note", "chips and cola");
++      await page.locator('#purchase-form button[type="submit"]').click();
++      const row = page.locator("#purchases-panel tbody tr", { hasText: "E2E Wholesale" });
++      await row.waitFor({ timeout: 7000 });
++      if (!(await row.textContent()).includes(earlier)) throw new Error("purchase date not shown: " + (await row.textContent()));
++      await waitMoneyBalance(before - 50);
++      // The value of an earlier batch is corrected later.
++      await row.locator('[data-action="admin-edit-purchase"]').click();
++      await page.fill("#pu-amount", "62.5");
++      await page.locator('#purchase-form button[type="submit"]').click();
++      await waitMoneyBalance(before - 62.5);
++      // The dashboard shows where the store stands too.
++      await adminView("dashboard", ".stats-grid");
++      const card = (await page.locator(".stat-card", { hasText: "Store balance" }).textContent()).replace(/\s+/g, " ");
++      if (!/if everyone pays|everyone has paid/.test(card)) throw new Error("store balance card: " + card);
++      return `balance ${before.toFixed(2)} -> ${(before - 62.5).toFixed(2)} after a 62.50 purchase dated ${earlier}`;
++    });
++
++    await step("admin: reset payment books what the customer paid on top, not as credit", async () => {
++      const order = await placeOrder("extra_e2e");
++      await adminView("money", "#money-balance");
++      const before = await moneyBalance();
++      await adminView("customers", "#admin-main-container table");
++      const row = () => page.locator("tbody tr").filter({ has: page.locator("td:first-child", { hasText: /^\s*extra_e2e/ }) });
++      await row().locator(".reset-payment").click();
++      await page.fill("#rp-extra", "2.5");
++      await page.fill("#rp-note", "keep the change");
++      await page.locator("#confirm-reset").click();
++      await page.waitForSelector(".toast.success >> text=extra", { timeout: 5000 });
++      await page.waitForFunction(() => [...document.querySelectorAll("tbody tr")]
++        .some((tr) => tr.textContent.includes("extra_e2e") && /\b0,00/.test(tr.querySelectorAll("td")[6].textContent)));
++      const owed = (await row().locator("td").nth(6).textContent()).replace(/\s+/g, "");
++      if (owed !== "0,00€") throw new Error("the extra payment must not change the customer's balance: " + owed);
++      await adminView("money", "#extras-panel");
++      const extra = page.locator("#extras-panel tbody tr", { hasText: "extra_e2e" });
++      await extra.waitFor({ timeout: 7000 });
++      if (money(await extra.locator("td").nth(3).textContent()) !== 2.5) throw new Error("extra amount: " + (await extra.textContent()));
++      await waitMoneyBalance(before + order.total + 2.5);
++      return `balance +${order.total.toFixed(2)} paid +2.50 extra`;
++    });
++
++    await step("admin: the money page says plus, minus or even once everyone has paid", async () => {
++      await adminView("customers", "#admin-main-container table");
++      for (;;) {
++        const reset = page.locator(".reset-payment").first();
++        if ((await reset.count()) === 0) break;
++        await reset.click();
++        await page.locator("#confirm-reset").click();
++        await page.waitForTimeout(500);
++      }
++      await adminView("money", "#money-summary");
++      const text = (await page.locator("#money-summary").textContent()).replace(/\s+/g, " ");
++      if (!text.includes("Everyone has paid")) throw new Error("not settled: " + text);
++      const balance = await moneyBalance();
++      const word = balance === 0 ? "even" : balance > 0 ? "in plus" : "in minus";
++      if (!text.includes(word)) throw new Error(`summary "${text}" does not say ${word} for ${balance}`);
++      return `everyone paid: ${word} (${balance.toFixed(2)})`;
++    });
++
++    // ---- PAY: how customers can pay ----
++    await step("customer: no Pay button until the admin sets up a payment method", async () => {
++      await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
++      await page.waitForSelector(".product-card");
++      if ((await page.locator("#pay-btn").count()) !== 0) throw new Error("Pay shown without payment methods");
++      return "hidden";
++    });
++
++    await step("admin: payment methods are chosen in settings and shown by the kiosk's Pay button", async () => {
++      await adminView("settings", "#pay-methods-editor");
++      await page.fill("#s-pay_instructions", "Pay within 14 days");
++      await page.locator("#pay-add").click();
++      await page.locator('[data-pay-row="0"] [data-field="label"]').fill("Swish");
++      await page.locator('[data-pay-row="0"] [data-field="value"]').fill("070-111 22 33");
++      await page.locator('[data-pay-row="0"] [data-field="note"]').fill("Write your username as the message");
++      await page.locator("#pay-add").click();
++      await page.locator('[data-pay-row="1"] [data-field="type"]').selectOption("bank");
++      await page.locator('[data-pay-row="1"] [data-field="label"]').fill("Bank transfer");
++      await page.locator('[data-pay-row="1"] [data-field="value"]').fill("SE12 3456 7890 1234");
++      await page.locator('[data-action="admin-save-settings"]').evaluate((el) => el.click());
++      await waitForSettings(
++        (settings) => JSON.parse(settings.payment_methods || "[]").length === 2 && settings.pay_instructions === "Pay within 14 days",
++        "two payment methods and the instruction"
++      );
++
++      await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
++      await page.waitForSelector("#pay-btn", { timeout: 7000 });
++      await page.locator("#pay-btn").click();
++      await page.waitForSelector(".pay-method");
++      const text = (await page.locator("#modal-overlay").textContent()).replace(/\s+/g, " ");
++      for (const expected of ["Pay within 14 days", "Swish", "070-111 22 33", "Write your username as the message", "Bank transfer", "SE12 3456 7890 1234"]) {
++        if (!text.includes(expected)) throw new Error(`Pay dialog misses "${expected}": ${text}`);
++      }
++      await page.locator('#modal-overlay [data-action="modal-close"]').click();
++      await page.waitForSelector("#modal-overlay", { state: "detached" });
++      return "Pay shows instructions, Swish and bank details";
++    });
++
++    await step("customer: Pay from the lookup shows the amount and asks for the username as message", async () => {
++      const order = await placeOrder("pay_e2e");
++      await page.locator("#lookup-btn").click();
++      await page.fill("#lk-username", "pay_e2e");
++      await page.locator('#lookup-form button[type="submit"]').click();
++      await page.waitForSelector("#modal-overlay .balance-big", { timeout: 7000 });
++      await page.locator('#modal-overlay [data-action="kiosk-open-pay"]').click();
++      await page.waitForSelector(".pay-reference");
++      const text = (await page.locator("#modal-overlay").textContent()).replace(/\s+/g, " ");
++      if (!text.includes("Write pay_e2e as the message")) throw new Error("no reference hint: " + text);
++      if (Math.abs(money(await page.locator("#modal-overlay .balance-big").textContent()) - order.total) > 0.005) {
++        throw new Error("amount missing: " + text);
++      }
++      await page.locator('#modal-overlay [data-action="kiosk-pay-back"]').click();
++      await page.waitForSelector("#modal-overlay .history-order", { timeout: 7000 });
++      await page.keyboard.press("Escape");
++      await page.waitForSelector("#modal-overlay", { state: "detached" });
++      return `Pay for ${order.total.toFixed(2)} with the username as message; Back returns to the lookup`;
++    });
++
++    await step("admin: a QR code can be uploaded and the kiosk shows it", async () => {
++      const png = Buffer.from(
++        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
++        "base64"
++      );
++      await adminView("settings", "#pay-methods-editor");
++      await page.locator("#pay-add").click();
++      await page.locator('[data-pay-row="2"] [data-field="type"]').selectOption("qr");
++      await page.locator('[data-pay-row="2"] [data-field="label"]').fill("Swish QR");
++      await page.locator('[data-pay-row="2"] input[type="file"]').setInputFiles({ name: "qr.png", mimeType: "image/png", buffer: png });
++      await page.waitForSelector('[data-pay-row="2"] .pay-edit-preview', { timeout: 7000 });
++      await page.locator('[data-action="admin-save-settings"]').evaluate((el) => el.click());
++      await waitForSettings((settings) => {
++        const methods = JSON.parse(settings.payment_methods || "[]");
++        return methods.length === 3 && /^pay-[0-9a-f]{32}\.png$/.test(methods[2].image);
++      }, "three payment methods with an uploaded QR code");
++      await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
++      await page.locator("#pay-btn").click();
++      await page.waitForSelector("img.pay-qr");
++      const loaded = await page.locator("img.pay-qr").evaluate((img) => img.complete && img.naturalWidth > 0);
++      if (!loaded) throw new Error("the QR code image did not load");
++      await page.keyboard.press("Escape");
++      return "QR code uploaded, saved and shown at the kiosk";
++    });
++
++    await step("admin: hiding or removing every payment method hides the Pay button again", async () => {
++      await setSetting("payment_methods", "[]");
++      await setSetting("pay_instructions", "");
++      await page.goto(`http://127.0.0.1:${PORT}/`, { waitUntil: "networkidle" });
++      await page.waitForSelector(".product-card");
++      if ((await page.locator("#pay-btn").count()) !== 0) throw new Error("Pay still shown");
++      const gone = await page.evaluate(async () => (await fetch("/api/settings")).json());
++      if (gone.payment_methods !== "[]") throw new Error("settings not cleared");
++      return "Pay hidden";
++    });
+   } catch (e) {
+     results.push("FAIL  outer — " + e.message);
+   }

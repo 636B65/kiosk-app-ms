@@ -4,6 +4,11 @@ All notable changes to this project are documented here. Versions follow
 [Semantic Versioning](https://semver.org/); the newest `## [x.y.z]` heading is
 what `release.yml` tags and publishes.
 
+## [1.1.0] - 2026-11-25
+
+### Changed
+- Ported from kiosk-app v1.6.0 ([release notes](https://github.com/636B65/kiosk-app/releases/tag/v1.6.0)), a minor release: frontend synced; backend: see upstream/changes/v1.6.0.md.
+
 ## [1.0.4] - 2026-11-24
 
 ### Security
