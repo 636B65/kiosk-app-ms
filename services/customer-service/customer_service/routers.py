@@ -1,7 +1,7 @@
 from datetime import timedelta
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Request
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -12,7 +12,10 @@ from customer_service.schemas import (
     CustomerOut,
     CustomerStats,
     CustomerWithBalance,
+    ExtraPaymentIn,
+    ExtraPaymentOut,
     PinChangeIn,
+    ResetPaymentIn,
     ResolveIn,
     ResolveOut,
 )
@@ -150,11 +153,22 @@ def customer_lookup(
     )
 
 
-def settle_pending(request: Request, customer: Customer, actor: str, action: str) -> dict:
-    """Mark every pending order paid (the order service does the compare-and-set)."""
+def settle_pending(
+    request: Request, customer: Customer, actor: str, action: str, extra_amount: float = 0.0, extra_note: str = ""
+) -> dict:
+    """Mark every pending order paid (the order service does the compare-and-set).
+
+    An extra amount travels in the same call, so it is booked in the same transaction.
+    """
     return orders_client(request).post(
         f"/internal/orders/customers/{customer.username}/settle",
-        json={"actor": actor, "action": action},
+        json={
+            "actor": actor,
+            "action": action,
+            "customer_id": customer.id,
+            "extra_amount": extra_amount,
+            "extra_note": extra_note,
+        },
     )
 
 
@@ -217,9 +231,35 @@ def reset_pin(
 
 @router.post("/{username}/reset-payment")
 def reset_payment(
-    username: str, request: Request, db: Session = Depends(get_db), user: Principal = Depends(get_current_user)
+    username: str,
+    request: Request,
+    data: Optional[ResetPaymentIn] = Body(default=None),
+    db: Session = Depends(get_db),
+    user: Principal = Depends(get_current_user),
 ):
-    return settle_pending(request, find_customer(db, username), user.username, "customer.reset_payment")
+    """Mark all pending orders paid. `extra_amount` is what the customer paid on top of
+    the debt; it is booked as an extra payment (store income that covers shrinkage)."""
+    data = data or ResetPaymentIn()
+    return settle_pending(
+        request, find_customer(db, username), user.username, "customer.reset_payment",
+        extra_amount=data.extra_amount or 0.0, extra_note=data.note,
+    )
+
+
+@router.post("/{username}/extra-payment", response_model=ExtraPaymentOut, status_code=201)
+def record_extra_payment(
+    username: str,
+    data: ExtraPaymentIn,
+    request: Request,
+    db: Session = Depends(get_db),
+    user: Principal = Depends(get_current_user),
+):
+    """A customer paid more than they owed (or paid in advance): book the surplus."""
+    customer = find_customer(db, username)
+    return orders_client(request).post(
+        f"/internal/orders/customers/{customer.username}/extra-payment",
+        json={"actor": user.username, "customer_id": customer.id, "amount": data.amount, "note": data.note},
+    )
 
 
 # ---- internal API (order service) ----------------------------------------

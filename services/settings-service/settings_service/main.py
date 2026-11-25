@@ -10,7 +10,7 @@ from kiosk_common.http import ServiceClient
 from kiosk_common.outbox import OutboxRelay
 from settings_service.config import Config
 from settings_service.models import DEFAULTS, Base, Outbox, Setting
-from settings_service.routers import router
+from settings_service.routers import images, router
 
 
 def seed(database: Database) -> None:
@@ -47,4 +47,5 @@ def create_app(config: Config | None = None) -> FastAPI:
     app.state.clients = clients
     app.state.relay = relay
     app.include_router(router)
+    app.include_router(images)
     return app

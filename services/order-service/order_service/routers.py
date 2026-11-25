@@ -14,11 +14,13 @@ from kiosk_common.outbox import publish
 from kiosk_common.timeutil import parse_dt, utcnow
 from kiosk_common.usernames import normalize_username
 from order_service.due_dates import due_time_from_settings
-from order_service.models import Order, OrderItem, Outbox
+from order_service.models import ExtraPayment, Order, OrderItem, Outbox
 from order_service.schemas import (
     CustomerHistoryOut,
     CustomersStatsOut,
     CustomerSummary,
+    ExtraPaymentCreate,
+    ExtraPaymentOut,
     FavoriteOut,
     OrderCreate,
     OrderExportOut,
@@ -289,9 +291,41 @@ def customer_balance(username: str, db: Session = Depends(get_db)):
     }
 
 
+def add_extra_payment(
+    db: Session, username: str, customer_id: Optional[int], actor: str, amount: float, note: str = ""
+) -> ExtraPayment:
+    """Book what a customer paid on top of their debt (no commit; the caller commits).
+
+    It is income of the store, not credit on the customer: their balance, totals and
+    statement stay what they were.
+    """
+    extra = ExtraPayment(
+        customer_id=customer_id, username=username, amount=round(amount, 2), note=note.strip(), created_by=actor
+    )
+    db.add(extra)
+    db.flush()
+    audit.record(
+        db, Outbox, actor, "customer.extra_payment", "customer", username,
+        f"extra payment of {extra.amount:.2f}" + (f": {extra.note}" if extra.note else ""),
+    )
+    return extra
+
+
+@internal.post("/customers/{username}/extra-payment", response_model=ExtraPaymentOut, status_code=201)
+def record_extra_payment(username: str, data: ExtraPaymentCreate, db: Session = Depends(get_db)):
+    extra = add_extra_payment(db, normalize_username(username), data.customer_id, data.actor, data.amount, data.note)
+    db.commit()
+    db.refresh(extra)
+    return extra
+
+
 @internal.post("/customers/{username}/settle")
 def settle_customer(username: str, data: SettleIn, db: Session = Depends(get_db)):
-    """Mark ALL pending orders of a customer paid (reset payment / self-mark-paid)."""
+    """Mark ALL pending orders of a customer paid (reset payment / self-mark-paid).
+
+    An optional extra amount is booked in the same transaction, so it is never lost
+    between the settlement and the extra payment.
+    """
     name = normalize_username(username)
     orders = db.query(Order).filter(Order.customer_username == name, Order.status == "pending").all()
     # Compare-and-set per order: an order cancelled by staff at this very moment
@@ -312,8 +346,11 @@ def settle_customer(username: str, data: SettleIn, db: Session = Depends(get_db)
             db, Outbox, data.actor, data.action, "customer", name,
             f"{len(settled)} order(s) marked paid: " + ", ".join(f"#{o.id}" for o in settled) + f"; amount {amount}",
         )
+    extra = round(data.extra_amount or 0.0, 2)
+    if extra > 0:
+        add_extra_payment(db, name, data.customer_id, data.actor, extra, data.extra_note)
     db.commit()
-    return {"username": name, "settled": len(settled), "amount": amount}
+    return {"username": name, "settled": len(settled), "amount": amount, "extra": extra if extra > 0 else 0.0}
 
 
 @internal.get("/export", response_model=List[OrderExportOut])

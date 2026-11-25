@@ -50,6 +50,57 @@ def outstanding_total(orders: list[dict]) -> float:
     return money(sum(o["total"] for o in orders if o["status"] == "pending"))
 
 
+def balance_status(amount: float) -> str:
+    """"plus", "minus" or "even" (to the cent) for a store balance."""
+    cents = round(amount, 2)
+    if cents == 0:
+        return "even"
+    return "plus" if cents > 0 else "minus"
+
+
+def store_balance(orders: list[dict], purchases: list[dict], extras: list[dict], shrinkage: float) -> dict:
+    """What the store has taken in and spent, whatever the sales report basis.
+
+    Always computed from the rows (never kept as a running total), so it stays right when
+    an order goes paid -> pending, is cancelled, or a purchase is edited later:
+
+        balance = paid orders + extra payments - purchases
+
+    Orders still on credit are not in the balance yet; `projected_balance` adds them, which is
+    where the store ends up when everybody has paid. Missing goods are NOT subtracted: they
+    were bought and never sold, so they already show as a lower balance. Extra payments
+    are the money that covers that loss, so the shrinkage figures are information next to it.
+    """
+    paid = money(sum(o["total"] for o in orders if o["status"] == "paid"))
+    extra = money(sum(e["amount"] for e in extras))
+    spent = money(sum(p["amount"] for p in purchases))
+    pending_orders = sum(o["status"] == "pending" for o in orders)
+    outstanding = outstanding_total(orders)
+    balance = money(paid + extra - spent)
+    projected = money(balance + outstanding)
+    shrinkage = money(shrinkage)
+    return {
+        "purchases_total": spent,
+        "purchases_count": len(purchases),
+        "paid_total": paid,
+        "extra_total": extra,
+        "extra_count": len(extras),
+        "income_total": money(paid + extra),
+        "balance": balance,
+        "status": balance_status(balance),
+        "outstanding": outstanding,
+        "pending_orders": pending_orders,
+        # True when nobody owes anything: then `status` is the final result.
+        "settled": pending_orders == 0,
+        "projected_balance": projected,
+        "projected_status": balance_status(projected),
+        "shrinkage_value": shrinkage,
+        "shrinkage_covered": money(min(extra, shrinkage)),
+        "shrinkage_uncovered": money(max(0.0, shrinkage - extra)),
+        "extra_surplus": money(max(0.0, extra - shrinkage)),
+    }
+
+
 def low_stock_products(products: list[dict]) -> list[dict]:
     """Active products at or below their own restock threshold, emptiest first."""
     rows = [

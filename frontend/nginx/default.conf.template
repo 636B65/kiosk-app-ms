@@ -60,9 +60,13 @@ server {
     location ^~ /api/products      { proxy_pass $catalog_service; }
     location ^~ /api/restocks      { proxy_pass $catalog_service; }
     location ^~ /api/inventory     { proxy_pass $catalog_service; }
+    # Uploaded payment QR codes live in the settings service; every other image is a product image.
+    location ^~ /api/images/pay-   { proxy_pass $settings_service; }
     location ^~ /api/images        { proxy_pass $catalog_service; }
     location ^~ /api/customers     { proxy_pass $customer_service; }
     location ^~ /api/orders        { proxy_pass $order_service; }
+    location ^~ /api/purchases     { proxy_pass $order_service; }
+    location ^~ /api/extra-payments { proxy_pass $order_service; }
     location ^~ /api/settings      { proxy_pass $settings_service; }
     location ^~ /api/audit         { proxy_pass $audit_service; }
     location ^~ /api/reports       { proxy_pass $report_service; }

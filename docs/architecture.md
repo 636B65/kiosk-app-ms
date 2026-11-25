@@ -55,6 +55,17 @@ the customer service, which delegates the settlement to
 `POST /internal/orders/customers/{u}/settle` (compare-and-set per order, so an
 order cancelled at the same moment never ends up paid).
 
+## Money: purchases, extra payments, the store balance
+
+The order service owns the `purchases` and `extra_payments` tables. Reset payment with an
+`extra_amount` is one call to the order service (`/internal/orders/customers/{u}/settle`), so the
+settlement and the extra payment commit together; `POST /api/customers/{u}/extra-payment` is the
+same booking without a settlement. The report service computes the store balance on read
+(*paid orders + extra payments - purchases*) from `/internal/orders/export` and
+`/internal/money/*`, plus the shrinkage value from the catalog's counts, so it is always derived
+from the rows and never a stored counter. Payment info for the kiosk's Pay screen is two public
+settings; uploaded QR codes are rows in the settings database, served at `/api/images/pay-*`.
+
 ## Audit log
 
 `kiosk_common.audit.record()` writes the entry into the service's own `outbox`

@@ -105,3 +105,27 @@ class ResolveOut(BaseModel):
     id: int
     username: str
     created: bool = False
+
+
+MAX_MONEY_AMOUNT = 10_000_000
+
+
+class ExtraPaymentIn(BaseModel):
+    amount: float = Field(gt=0, le=MAX_MONEY_AMOUNT)
+    note: str = Field(default="", max_length=200)
+
+
+class ExtraPaymentOut(BaseModel):
+    id: int
+    username: str
+    amount: float
+    note: str = ""
+    created_by: str = ""
+    created_at: Optional[datetime] = None
+
+
+class ResetPaymentIn(BaseModel):
+    """Optional body of reset-payment: what the customer paid on top of the debt."""
+
+    extra_amount: Optional[float] = Field(default=None, ge=0, le=MAX_MONEY_AMOUNT)
+    note: str = Field(default="", max_length=200)

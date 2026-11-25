@@ -11,7 +11,7 @@ from kiosk_common.csvutil import csv_safe
 from kiosk_common.money import money
 from kiosk_common.timeutil import utcnow
 from report_service import reports as R
-from report_service.data import load, load_adjustments
+from report_service.data import load, load_adjustments, load_money
 from report_service.reports import BASIS_LABEL, Basis
 
 router = APIRouter(prefix="/api/reports", tags=["reports"], dependencies=[Depends(get_current_user)])
@@ -41,6 +41,18 @@ def customer_insights(request: Request, limit: int = Query(default=5, ge=1, le=2
     }
 
 
+def _store_balance(request: Request, orders: list[dict]) -> dict:
+    purchases, extras = load_money(request)
+    shrinkage = R.shrinkage_report(load_adjustments(request, None, None), "all")["totals"]["value_lost"]
+    return R.store_balance(orders, purchases, extras, shrinkage)
+
+
+@router.get("/balance")
+def balance(request: Request):
+    """Store balance: paid orders + extra payments - purchases (see R.store_balance)."""
+    return _store_balance(request, load(request).orders)
+
+
 @router.get("/summary")
 def summary(request: Request, basis: Basis = "sales"):
     data = load(request, products=True, settings=True)
@@ -58,6 +70,7 @@ def summary(request: Request, basis: Basis = "sales"):
         "next_due_date": data.due_date,
         "low_stock_products": R.low_stock_products(data.products),
         "margin_month": R.margins_for_period(orders, month, next_month, basis)["totals"],
+        "store_balance": _store_balance(request, orders),
     }
 
 
@@ -129,6 +142,26 @@ def export_csv(request: Request, basis: Basis = "sales"):
         if order["status"] == "paid":
             row["paid_orders"] += 1
             row["paid_total"] += order["total"]
+    purchases, extras = load_money(request)
+    shrinkage = R.shrinkage_report(load_adjustments(request, None, None), "all")["totals"]["value_lost"]
+    bal = R.store_balance(orders, purchases, extras, shrinkage)
+    write_row("store_balance", record="purchases", count=bal["purchases_count"],
+              amount=bal["purchases_total"], details="money spent on goods")
+    write_row("store_balance", record="paid_orders", amount=bal["paid_total"],
+              details="orders marked paid")
+    write_row("store_balance", record="extra_payments", count=bal["extra_count"],
+              amount=bal["extra_total"], details="paid on top of debts; covers shrinkage")
+    write_row("store_balance", record="balance", amount=bal["balance"], details=bal["status"])
+    write_row("store_balance", record="outstanding", count=bal["pending_orders"],
+              amount=bal["outstanding"], details="credit not yet paid")
+    write_row("store_balance", record="projected_balance", amount=bal["projected_balance"],
+              details=f"if everybody pays: {bal['projected_status']}")
+    write_row("store_balance", record="shrinkage_value", amount=bal["shrinkage_value"],
+              details=f"covered by extra payments: {bal['shrinkage_covered']}")
+    for purchase in purchases:
+        write_row("purchases", period=purchase["purchased_on"], record="purchase",
+                  record_id=purchase["id"], name=purchase["supplier"], amount=purchase["amount"],
+                  details=purchase["note"])
     for customer in sorted(data.customers, key=lambda c: c["username"]):
         username = customer["username"]
         pending = pending_by_customer.get(username, [])

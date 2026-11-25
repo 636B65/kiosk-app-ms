@@ -45,9 +45,13 @@ ROUTES = [
     ("/api/products", "catalog"),
     ("/api/restocks", "catalog"),
     ("/api/inventory", "catalog"),
+    # A prefix ending in "-" matches by plain prefix (like nginx `^~`); the longest one wins.
+    ("/api/images/pay-", "settings"),
     ("/api/images", "catalog"),
     ("/api/customers", "customers"),
     ("/api/orders", "orders"),
+    ("/api/purchases", "orders"),
+    ("/api/extra-payments", "orders"),
     ("/api/settings", "settings"),
     ("/api/audit", "audit"),
     ("/api/reports", "reports"),
@@ -70,7 +74,7 @@ class Gateway:
                     return
         path = scope.get("path", "")
         for prefix, name in ROUTES:
-            if path == prefix or path.startswith(prefix + "/"):
+            if path == prefix or path.startswith(prefix + "/") or (prefix.endswith("-") and path.startswith(prefix)):
                 await self.apps[name](scope, receive, send)
                 return
         body = json.dumps({"detail": "Not Found"}).encode()

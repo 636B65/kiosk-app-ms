@@ -57,3 +57,9 @@ def load_adjustments(request: Request, start: datetime | None, end: datetime | N
     for row in rows:
         row["created_at"] = parse_dt(row.get("created_at"))
     return rows
+
+
+def load_money(request: Request) -> tuple[list[dict], list[dict]]:
+    """Purchases and extra payments (oldest first) from the order service."""
+    orders = request.app.state.clients["orders"]
+    return orders.get("/internal/money/purchases"), orders.get("/internal/money/extra-payments")
